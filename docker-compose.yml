@@ -1,0 +1,32 @@
+# Local/self-hosted dependencies for NTPCS. Brings up Postgres (required) and
+# Redis (provisioned, unused by the app code today) so you can run the whole
+# stack with nothing but Docker + Node installed.
+#
+#   docker compose up -d
+#   pnpm install
+#   pnpm db:migrate
+#   pnpm db:seed
+#   pnpm build && pnpm start      # or: pnpm dev
+#
+version: "3.8"
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ntpcs
+      POSTGRES_PASSWORD: ntpcs_dev_pw
+      POSTGRES_DB: ntpcs
+    ports:
+      - "5432:5432"
+    volumes:
+      - ntpcs_pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  ntpcs_pg_data:
