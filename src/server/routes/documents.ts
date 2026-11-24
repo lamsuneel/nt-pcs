@@ -114,6 +114,7 @@ documentRoutes.post('/', requirePermission(PERMISSIONS.DOCUMENT_REGISTER), async
 // unless sourceRecordType says ELECTRONIC_SIGNATURE.
 documentRoutes.post('/:id/revisions/:revisionId/approve', requirePermission(PERMISSIONS.DOCUMENT_REVISE), async (c) => {
   const session = c.get('session');
+  const documentId = c.req.param('id');
   const revisionId = c.req.param('revisionId');
   const [updated] = await db
     .update(documentRevisions)
@@ -122,13 +123,15 @@ documentRoutes.post('/:id/revisions/:revisionId/approve', requirePermission(PERM
     .returning();
   if (!updated) return c.json({ error: 'Not found' }, 404);
 
+  const [parentDoc] = await db.select().from(documents).where(eq(documents.id, documentId));
+
   await recordAuditEvent({
     organizationId: session.organizationId,
     userId: session.userId,
     eventType: 'REVISION_APPROVED',
     entityType: 'document_revision',
     entityId: revisionId,
-    summary: `Revision ${updated.revisionLabel} approved`,
+    summary: `Revision ${updated.revisionLabel} of ${parentDoc?.documentNumber ?? documentId} approved`,
   });
 
   return c.json({ revision: updated });
@@ -163,13 +166,15 @@ documentRoutes.post('/:id/revisions', requirePermission(PERMISSIONS.DOCUMENT_REV
     })
     .returning();
 
+  const [parentDoc] = await db.select().from(documents).where(eq(documents.id, documentId));
+
   await recordAuditEvent({
     organizationId: session.organizationId,
     userId: session.userId,
     eventType: 'REVISION_REGISTERED',
     entityType: 'document_revision',
     entityId: revision.id,
-    summary: `New revision ${revision.revisionLabel} registered for document ${documentId}`,
+    summary: `New revision ${revision.revisionLabel} registered for document ${parentDoc?.documentNumber ?? documentId}`,
   });
 
   return c.json({ revision }, 201);

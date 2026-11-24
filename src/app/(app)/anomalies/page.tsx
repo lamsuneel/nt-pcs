@@ -49,8 +49,17 @@ export default function AnomaliesPage() {
     <div>
       <PageHeader
         title="AI Anomaly Watch"
-        subtitle="Pattern checks run over the live audit ledger. Max-tier in production adds model-scored anomalies across the full event graph — these two checks are real, computed from your data now."
+        subtitle="Two rule-based checks run over the real audit ledger below — no sample data, no model. A full Max-tier deployment would add a trained anomaly-detection model scoring the whole event graph; these two are plain, explainable rules you can verify by eye."
       />
+
+      <Card className="mb-6 bg-nt-panel2/60">
+        <div className="text-nt-text text-sm font-medium mb-2">What's being checked</div>
+        <ul className="text-nt-muted text-xs space-y-1.5 list-disc pl-4">
+          <li><b className="text-nt-text">Unusually fast approvals</b> — for every print request, the time between its "requested" and "approved" audit events is measured. Anything approved in under {FAST_APPROVAL_THRESHOLD_SECONDS} seconds is flagged — too fast for a human to have actually opened and reviewed it.</li>
+          <li><b className="text-nt-text">Duplicate destruction events</b> — the ledger is grouped by the controlled copy each destruction event refers to. A copy destroyed more than once is flagged, since a copy can only physically be destroyed once.</li>
+        </ul>
+      </Card>
+
       {error && <Card className="mb-5 text-sm text-nt-blocked">{error}</Card>}
       {!error && totalAnomalies === 0 && <EmptyState message="No anomalies detected against the current ledger." />}
 
