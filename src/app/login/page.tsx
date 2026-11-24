@@ -83,7 +83,6 @@ export default function LoginPage() {
           </form>
 
           <div className="mt-6 pt-5 border-t border-nt-border">
-            <div className="text-[11px] text-nt-muted mb-2">Demo accounts (password: Password123!)</div>
             <div className="grid grid-cols-2 gap-1.5">
               {DEMO_USERS.map(([role, mail]) => (
                 <button
