@@ -87,7 +87,7 @@ export default function VerifyEntryPage() {
   return (
     <div className="min-h-screen bg-nt-bg flex items-center justify-center px-4 font-sans">
       <div className="w-full max-w-sm text-center">
-        <img src="/brand/neuratrace-symbol-color.png" alt="PrintAssure" className="w-10 h-10 object-contain mx-auto mb-4" />
+        <img src="/brand/nt-logo-mark.png" alt="PrintAssure" className="w-10 h-10 rounded-lg object-contain mx-auto mb-4" />
         <h1 className="font-display text-lg text-nt-text mb-1">Scan a controlled copy</h1>
         <p className="text-nt-muted text-sm mb-6">Point your camera at the QR code on a controlled copy.</p>
 

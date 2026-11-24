@@ -64,11 +64,11 @@ export function SideNav({ fullName, roles }: { fullName: string; roles: string[]
   return (
     <aside className="w-64 shrink-0 border-r border-nt-border bg-nt-panel min-h-screen flex flex-col">
       <div className="px-5 py-5 border-b border-nt-border">
-        <img src="/brand/neuratrace-symbol-color.png" alt="PrintAssure" className="w-10 h-10 object-contain" />
+        <img src="/brand/nt-logo-mark.png" alt="PrintAssure" className="w-10 h-10 rounded-lg object-contain" />
         <div className="mt-2.5">
           <div className="font-display text-base text-nt-text leading-tight">PrintAssure</div>
-          <div className="flex items-center gap-1 text-[11px] text-nt-muted leading-tight mt-1">
-            by <img src="/brand/neuratrace-wordmark-black.png" alt="NeuraTrace" className="h-2.5 w-auto object-contain" />
+          <div className="flex items-center gap-1.5 text-[11px] text-nt-muted leading-tight mt-1.5">
+            by <img src="/brand/nt-logo-wordmark.png" alt="NeuraTrace" className="h-4 w-auto rounded object-contain" />
           </div>
         </div>
       </div>
