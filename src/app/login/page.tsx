@@ -44,9 +44,11 @@ export default function LoginPage() {
     <div className="min-h-screen bg-nt-bg flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         <div className="flex flex-col items-center mb-8">
-          <img src="/logo-mark.png" alt="PrintAssure" className="w-14 h-14 object-contain" />
+          <img src="/brand/neuratrace-symbol-color.png" alt="PrintAssure" className="w-14 h-14 object-contain" />
           <div className="font-display text-xl text-nt-text mt-3">PrintAssure</div>
-          <div className="text-xs text-nt-muted mt-0.5">by NeuraTrace</div>
+          <div className="flex items-center gap-1.5 text-xs text-nt-muted mt-1">
+            by <img src="/brand/neuratrace-wordmark-black.png" alt="NeuraTrace" className="h-3 w-auto object-contain" />
+          </div>
         </div>
         <div className="nt-card p-7">
           <h1 className="font-display text-lg text-nt-text mb-1">Print Control System</h1>

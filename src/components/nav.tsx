@@ -64,17 +64,19 @@ export function SideNav({ fullName, roles }: { fullName: string; roles: string[]
   return (
     <aside className="w-64 shrink-0 border-r border-nt-border bg-nt-panel min-h-screen flex flex-col">
       <div className="px-5 py-5 border-b border-nt-border">
-        <img src="/logo-mark.png" alt="PrintAssure" className="w-10 h-10 object-contain" />
+        <img src="/brand/neuratrace-symbol-color.png" alt="PrintAssure" className="w-10 h-10 object-contain" />
         <div className="mt-2.5">
           <div className="font-display text-base text-nt-text leading-tight">PrintAssure</div>
-          <div className="text-[11px] text-nt-muted leading-tight mt-0.5">by NeuraTrace</div>
+          <div className="flex items-center gap-1 text-[11px] text-nt-muted leading-tight mt-1">
+            by <img src="/brand/neuratrace-wordmark-black.png" alt="NeuraTrace" className="h-2.5 w-auto object-contain" />
+          </div>
         </div>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
         {groups.map((group) => (
           <div key={group.label} className="mb-3">
             <div className="flex items-center gap-1.5 px-3 pt-2 pb-1">
-              <span className="text-[10px] font-semibold tracking-wider uppercase text-nt-muted2">{group.label}</span>
+              <span className="text-[10px] font-semibold tracking-wider uppercase text-nt-muted">{group.label}</span>
               {group.tag && (
                 <span
                   className={clsx(
@@ -94,8 +96,8 @@ export function SideNav({ fullName, roles }: { fullName: string; roles: string[]
                   key={item.href}
                   href={item.href}
                   className={clsx(
-                    'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition',
-                    active ? 'bg-nt-teal/10 text-nt-teal font-medium' : 'text-nt-muted hover:text-nt-text hover:bg-nt-panel2'
+                    'flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition',
+                    active ? 'bg-nt-teal/10 text-nt-teal' : 'text-nt-text/80 hover:text-nt-text hover:bg-nt-panel2'
                   )}
                 >
                   <span className={clsx('w-1.5 h-1.5 rounded-full shrink-0', active ? 'bg-nt-teal' : 'bg-nt-border')} />
