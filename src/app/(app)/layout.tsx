@@ -10,7 +10,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex min-h-screen bg-nt-bg">
       <SideNav fullName={session.fullName} roles={session.roles} />
-      <main className="flex-1 px-8 py-8">{children}</main>
+      <main className="flex-1 min-w-0 px-8 py-8">{children}</main>
       <AgentRail />
     </div>
   );

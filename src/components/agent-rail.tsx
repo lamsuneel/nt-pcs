@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { clsx } from 'clsx';
 import useSWRLite from '@/lib/use-swr-lite';
@@ -79,24 +79,15 @@ export function AgentRail() {
   const segment = (pathname.split('/')[1] || 'dashboard');
   const { data: kpis } = useSWRLite<Kpis>('/api/dashboard/kpis');
 
+  // Collapse state is intentionally NOT persisted across page loads — a
+  // demo walkthrough moves between personas and screens constantly, and a
+  // collapse click sticking forever (via localStorage) made the whole
+  // panel disappear down to a thin edge tab that's easy to miss and looks
+  // like the agent is simply gone. Every fresh page load starts expanded;
+  // collapsing only lasts for the current view.
   const [collapsed, setCollapsed] = useState(false);
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem('pa-agent-collapsed');
-      if (stored === '1') setCollapsed(true);
-    } catch {
-      /* ignore — per-viewer convenience only */
-    }
-  }, []);
   function toggle() {
-    setCollapsed((c) => {
-      try {
-        window.localStorage.setItem('pa-agent-collapsed', !c ? '1' : '0');
-      } catch {
-        /* ignore */
-      }
-      return !c;
-    });
+    setCollapsed((c) => !c);
   }
 
   const tips = buildTips(segment, kpis ?? null);
@@ -120,10 +111,11 @@ export function AgentRail() {
     return (
       <button
         onClick={toggle}
-        title="Open agent"
-        className="fixed right-0 top-1/2 -translate-y-1/2 w-6 h-16 rounded-l-lg bg-nt-teal text-nt-bg text-xs flex items-center justify-center hover:bg-nt-tealDim z-20"
+        title="Open PrintAssure Agent"
+        className="fixed right-0 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1.5 w-10 py-3 rounded-l-xl bg-nt-teal text-nt-bg shadow-lg hover:bg-nt-tealDim z-20"
       >
-        ⟨
+        <span className="text-base">🤖</span>
+        <span className="text-[10px] font-medium [writing-mode:vertical-rl] rotate-180">Agent</span>
       </button>
     );
   }
