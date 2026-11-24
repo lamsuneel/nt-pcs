@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import { eq } from 'drizzle-orm';
+import { eq, desc, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { sites, departments, users, roles, userRoles } from '@/db/schema';
+import { sites, departments, users, roles, userRoles, integrations, integrationSyncLogs } from '@/db/schema';
 import { requireAuth } from '../authz';
 
 export const metaRoutes = new Hono();
@@ -31,4 +31,17 @@ metaRoutes.get('/users', async (c) => {
   return c.json({
     users: userRows.map((u) => ({ ...u, passwordHash: undefined, roles: rolesByUser[u.id] ?? [] })),
   });
+});
+
+metaRoutes.get('/integrations', async (c) => {
+  const session = c.get('session');
+  const rows = await db.select().from(integrations).where(eq(integrations.organizationId, session.organizationId));
+  const logs = rows.length
+    ? await db
+        .select()
+        .from(integrationSyncLogs)
+        .where(inArray(integrationSyncLogs.integrationId, rows.map((r) => r.id)))
+        .orderBy(desc(integrationSyncLogs.startedAt))
+    : [];
+  return c.json({ integrations: rows, logs });
 });

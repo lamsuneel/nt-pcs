@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import useSWRLite from '@/lib/use-swr-lite';
 import { PageHeader, Table, Th, Td, StatusBadge, EmptyState, Button } from '@/components/ui';
 import Link from 'next/link';
+import { usePermissions } from '@/lib/use-permissions';
 
 const STATUS_FILTERS = ['ALL', 'PRINTED', 'ISSUED', 'ACTIVE', 'RECALL_PENDING', 'RETURNED', 'DESTROYED', 'LOST', 'DAMAGED'];
 
@@ -14,6 +15,7 @@ export default function CopiesPage() {
   const { data, refetch } = useSWRLite<{ copies: any[] }>(status === 'ALL' ? '/api/copies' : `/api/copies?status=${status}`);
   const [busy, setBusy] = useState<string | null>(null);
   const rows = data?.copies ?? [];
+  const { can, PERMISSIONS } = usePermissions();
 
   async function distribute(id: string) {
     const physicalLocation = prompt('Physical location?') ?? '';
@@ -82,9 +84,9 @@ export default function CopiesPage() {
                 <Td className="text-nt-muted text-xs">{r.printOutcome ?? '—'}</Td>
                 <Td><StatusBadge status={r.status} /></Td>
                 <Td className="space-x-2 whitespace-nowrap">
-                  {r.status === 'PRINTED' && <Button variant="secondary" onClick={() => distribute(r.id)} disabled={!!busy}>Issue</Button>}
-                  {r.status === 'ISSUED' && <Button variant="secondary" onClick={() => acknowledge(r.id)} disabled={!!busy}>Acknowledge</Button>}
-                  {['ISSUED', 'ACTIVE'].includes(r.status) && (
+                  {r.status === 'PRINTED' && can(PERMISSIONS.COPY_ISSUE) && <Button variant="secondary" onClick={() => distribute(r.id)} disabled={!!busy}>Issue</Button>}
+                  {r.status === 'ISSUED' && can(PERMISSIONS.COPY_ACKNOWLEDGE) && <Button variant="secondary" onClick={() => acknowledge(r.id)} disabled={!!busy}>Acknowledge</Button>}
+                  {['ISSUED', 'ACTIVE'].includes(r.status) && can(PERMISSIONS.COPY_INVENTORY_MANAGE) && (
                     <>
                       <Button variant="ghost" onClick={() => markStatus(r.id, 'LOST')} disabled={!!busy}>Lost</Button>
                       <Button variant="ghost" onClick={() => markStatus(r.id, 'DAMAGED')} disabled={!!busy}>Damaged</Button>

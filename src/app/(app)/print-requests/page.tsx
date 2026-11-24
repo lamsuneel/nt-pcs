@@ -3,11 +3,13 @@
 import { useState } from 'react';
 import useSWRLite from '@/lib/use-swr-lite';
 import { PageHeader, LinkButton, Table, Th, Td, StatusBadge, Button, EmptyState } from '@/components/ui';
+import { usePermissions } from '@/lib/use-permissions';
 
 export default function PrintRequestsPage() {
   const { data, refetch } = useSWRLite<{ printRequests: any[] }>('/api/print-requests');
   const [busy, setBusy] = useState<string | null>(null);
   const rows = data?.printRequests ?? [];
+  const { can, PERMISSIONS } = usePermissions();
 
   async function act(id: string, action: 'approve' | 'reject' | 'issue') {
     setBusy(id + action);
@@ -26,7 +28,7 @@ export default function PrintRequestsPage() {
       <PageHeader
         title="Print Requests"
         subtitle="Request, approve and issue controlled prints. Issuing generates unique copy IDs, QR codes and server-side PDFs."
-        actions={<LinkButton href="/print-requests/new">Request Controlled Print</LinkButton>}
+        actions={can(PERMISSIONS.PRINT_REQUEST) ? <LinkButton href="/print-requests/new">Request Controlled Print</LinkButton> : undefined}
       />
 
       {rows.length === 0 && <EmptyState message="No print requests yet." />}
@@ -47,17 +49,19 @@ export default function PrintRequestsPage() {
                 <Td><StatusBadge status={r.classification} /></Td>
                 <Td><StatusBadge status={r.status} /></Td>
                 <Td className="space-x-2 whitespace-nowrap">
-                  {r.status === 'REQUESTED' && (
+                  {r.status === 'REQUESTED' && can(PERMISSIONS.PRINT_APPROVE) && (
                     <>
                       <Button variant="secondary" onClick={() => act(r.id, 'approve')} disabled={!!busy}>Approve</Button>
                       <Button variant="danger" onClick={() => act(r.id, 'reject')} disabled={!!busy}>Reject</Button>
                     </>
                   )}
-                  {r.status === 'APPROVED' && (
+                  {r.status === 'APPROVED' && can(PERMISSIONS.PRINT_ISSUE) && (
                     <Button onClick={() => act(r.id, 'issue')} disabled={!!busy}>
                       {busy === r.id + 'issue' ? 'Generating PDFs...' : 'Issue & Generate Copies'}
                     </Button>
                   )}
+                  {r.status === 'REQUESTED' && !can(PERMISSIONS.PRINT_APPROVE) && <span className="text-nt-muted2 text-xs">Awaiting QA Head/Manager</span>}
+                  {r.status === 'APPROVED' && !can(PERMISSIONS.PRINT_ISSUE) && <span className="text-nt-muted2 text-xs">Awaiting Document Controller</span>}
                 </Td>
               </tr>
             ))}

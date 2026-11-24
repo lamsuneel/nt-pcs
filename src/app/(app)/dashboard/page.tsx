@@ -2,6 +2,7 @@
 
 import useSWRLite from '@/lib/use-swr-lite';
 import { KpiTile, PageHeader, LinkButton, Card } from '@/components/ui';
+import { usePermissions } from '@/lib/use-permissions';
 
 interface Kpis {
   totalRegisteredDocuments: number;
@@ -14,6 +15,7 @@ interface Kpis {
 
 export default function DashboardPage() {
   const { data } = useSWRLite<Kpis>('/api/dashboard/kpis');
+  const { can, PERMISSIONS } = usePermissions();
 
   return (
     <div>
@@ -22,8 +24,8 @@ export default function DashboardPage() {
         subtitle="Every printed GMP document, authorized, identifiable, traceable and accounted for."
         actions={
           <>
-            <LinkButton href="/documents/new" variant="secondary">Register Document</LinkButton>
-            <LinkButton href="/print-requests/new">Request Controlled Print</LinkButton>
+            {can(PERMISSIONS.DOCUMENT_REGISTER) && <LinkButton href="/documents/new" variant="secondary">Register Document</LinkButton>}
+            {can(PERMISSIONS.PRINT_REQUEST) && <LinkButton href="/print-requests/new">Request Controlled Print</LinkButton>}
           </>
         }
       />
@@ -40,12 +42,12 @@ export default function DashboardPage() {
       <Card>
         <div className="font-display text-sm text-nt-text mb-3">Quick actions</div>
         <div className="flex flex-wrap gap-2">
-          <LinkButton href="/documents/new" variant="secondary">Register Document</LinkButton>
-          <LinkButton href="/print-requests/new" variant="secondary">Request Controlled Print</LinkButton>
-          <LinkButton href="/copies" variant="secondary">Issue Copy</LinkButton>
+          {can(PERMISSIONS.DOCUMENT_REGISTER) && <LinkButton href="/documents/new" variant="secondary">Register Document</LinkButton>}
+          {can(PERMISSIONS.PRINT_REQUEST) && <LinkButton href="/print-requests/new" variant="secondary">Request Controlled Print</LinkButton>}
+          {can(PERMISSIONS.COPY_ISSUE) && <LinkButton href="/copies" variant="secondary">Issue Copy</LinkButton>}
           <LinkButton href="/verify" variant="secondary">Scan QR</LinkButton>
-          <LinkButton href="/recalls" variant="secondary">Initiate Recall</LinkButton>
-          <LinkButton href="/reports" variant="secondary">Generate Audit Report</LinkButton>
+          {can(PERMISSIONS.RECALL_INITIATE) && <LinkButton href="/recalls" variant="secondary">Initiate Recall</LinkButton>}
+          {can(PERMISSIONS.AUDIT_READ) && <LinkButton href="/reports" variant="secondary">Generate Audit Report</LinkButton>}
         </div>
       </Card>
     </div>

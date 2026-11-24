@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWRLite from '@/lib/use-swr-lite';
-import { PageHeader, Card, Button } from '@/components/ui';
+import { PageHeader, Card, Button, RequirePermission } from '@/components/ui';
+import { usePermissions } from '@/lib/use-permissions';
 
 const DOC_TYPES = [
   'SOP', 'WI', 'BMR', 'BPR', 'STP', 'SPECIFICATION', 'FORMAT_CHECKLIST',
@@ -13,6 +14,7 @@ const DOC_TYPES = [
 export default function NewDocumentPage() {
   const router = useRouter();
   const { data: org } = useSWRLite<{ sites: any[]; departments: any[] }>('/api/meta/org');
+  const { can, loading: permLoading, PERMISSIONS } = usePermissions();
   const [form, setForm] = useState({
     documentNumber: '', title: '', documentType: 'SOP', departmentId: '', siteId: '',
     masterCopyLocation: '', revisionLabel: '01',
@@ -62,6 +64,7 @@ export default function NewDocumentPage() {
   return (
     <div className="max-w-2xl">
       <PageHeader title="Register Document" subtitle="Works even with no DMS — this registers the document and a reference to its signed paper master." />
+      <RequirePermission allowed={can(PERMISSIONS.DOCUMENT_REGISTER)} loading={permLoading}>
       <Card>
         <form onSubmit={submit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -122,6 +125,7 @@ export default function NewDocumentPage() {
           <Button type="submit" disabled={submitting}>{submitting ? 'Registering...' : 'Register Document'}</Button>
         </form>
       </Card>
+      </RequirePermission>
     </div>
   );
 }

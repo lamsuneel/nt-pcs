@@ -3,13 +3,15 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import useSWRLite from '@/lib/use-swr-lite';
-import { PageHeader, Card, Button } from '@/components/ui';
+import { PageHeader, Card, Button, RequirePermission } from '@/components/ui';
+import { usePermissions } from '@/lib/use-permissions';
 
 export default function NewPrintRequestPage() {
   const router = useRouter();
   const search = useSearchParams();
   const { data: docsData } = useSWRLite<{ documents: any[] }>('/api/documents');
   const { data: org } = useSWRLite<{ departments: any[] }>('/api/meta/org');
+  const { can, loading: permLoading, PERMISSIONS } = usePermissions();
 
   const [form, setForm] = useState({
     documentId: search.get('documentId') ?? '',
@@ -52,6 +54,7 @@ export default function NewPrintRequestPage() {
   return (
     <div className="max-w-2xl">
       <PageHeader title="Request Controlled Print" subtitle="Only approved revisions can be requested for controlled printing." />
+      <RequirePermission allowed={can(PERMISSIONS.PRINT_REQUEST)} loading={permLoading}>
       <Card>
         <form onSubmit={submit} className="space-y-4">
           <Field label="Document">
@@ -93,6 +96,7 @@ export default function NewPrintRequestPage() {
           <Button type="submit" disabled={submitting}>{submitting ? 'Submitting...' : 'Submit Request'}</Button>
         </form>
       </Card>
+      </RequirePermission>
     </div>
   );
 }

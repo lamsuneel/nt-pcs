@@ -3,6 +3,7 @@
 import useSWRLite from '@/lib/use-swr-lite';
 import { PageHeader, LinkButton, Table, Th, Td, StatusBadge, EmptyState } from '@/components/ui';
 import Link from 'next/link';
+import { usePermissions } from '@/lib/use-permissions';
 
 interface DocRow {
   id: string;
@@ -17,13 +18,14 @@ interface DocRow {
 export default function DocumentsPage() {
   const { data, loading } = useSWRLite<{ documents: DocRow[] }>('/api/documents');
   const docs = data?.documents ?? [];
+  const { can, PERMISSIONS } = usePermissions();
 
   return (
     <div>
       <PageHeader
         title="Document Register"
         subtitle="The master register of controlled documents — works with or without a DMS."
-        actions={<LinkButton href="/documents/new">Register Document</LinkButton>}
+        actions={can(PERMISSIONS.DOCUMENT_REGISTER) ? <LinkButton href="/documents/new">Register Document</LinkButton> : undefined}
       />
 
       {!loading && docs.length === 0 && <EmptyState message="No documents registered yet." />}

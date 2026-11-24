@@ -99,6 +99,30 @@ export function EmptyState({ message }: { message: string }) {
   return <div className="text-nt-muted text-sm py-10 text-center">{message}</div>;
 }
 
+export function RequirePermission({
+  allowed,
+  loading,
+  children,
+}: {
+  allowed: boolean;
+  loading: boolean;
+  children: React.ReactNode;
+}) {
+  if (loading) return null;
+  if (!allowed) {
+    return (
+      <Card className="max-w-lg">
+        <div className="text-nt-text text-sm font-medium mb-1">Not available for your role</div>
+        <p className="text-nt-muted text-xs">
+          Your current persona doesn&apos;t hold the permission this action requires. Switch to a role that does, or ask whoever
+          holds it to carry it out.
+        </p>
+      </Card>
+    );
+  }
+  return <>{children}</>;
+}
+
 export function Table({ children }: { children: React.ReactNode }) {
   return (
     <div className="overflow-x-auto nt-card">
