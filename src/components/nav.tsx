@@ -37,12 +37,8 @@ const NAV_GROUPS: { label: string; tag?: 'pro' | 'max'; items: NavItem[] }[] = [
     label: 'Max',
     tag: 'max',
     items: [
-      { href: '/print-server', label: 'Print Server', requires: [PERMISSIONS.ADMIN_MANAGE, PERMISSIONS.AUDIT_READ] },
-      { href: '/follow-me', label: 'Follow-Me Print' },
-      { href: '/mobile', label: 'Mobile App' },
       { href: '/anomalies', label: 'AI Anomaly Watch', requires: [PERMISSIONS.AUDIT_READ] },
       { href: '/inspection-pack', label: 'Inspection Pack', requires: [PERMISSIONS.AUDIT_READ] },
-      { href: '/connectors', label: 'Connectors', requires: [PERMISSIONS.ADMIN_MANAGE] },
     ],
   },
 ];
@@ -67,11 +63,11 @@ export function SideNav({ fullName, roles }: { fullName: string; roles: string[]
 
   return (
     <aside className="w-64 shrink-0 border-r border-nt-border bg-nt-panel min-h-screen flex flex-col">
-      <div className="px-5 py-5 flex items-center gap-2 border-b border-nt-border">
-        <div className="w-7 h-7 rounded-lg bg-nt-teal flex items-center justify-center text-nt-bg font-display font-semibold text-xs">PA</div>
-        <div>
-          <div className="font-display text-sm text-nt-text leading-tight">PrintAssure</div>
-          <div className="text-[10px] text-nt-muted leading-tight">by NeuraTrace</div>
+      <div className="px-5 py-5 border-b border-nt-border">
+        <img src="/logo-mark.png" alt="PrintAssure" className="w-10 h-10 object-contain" />
+        <div className="mt-2.5">
+          <div className="font-display text-base text-nt-text leading-tight">PrintAssure</div>
+          <div className="text-[11px] text-nt-muted leading-tight mt-0.5">by NeuraTrace</div>
         </div>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">

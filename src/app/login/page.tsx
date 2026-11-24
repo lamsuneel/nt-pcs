@@ -43,9 +43,10 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-nt-bg flex items-center justify-center px-4">
       <div className="w-full max-w-md">
-        <div className="flex items-center gap-2 justify-center mb-8">
-          <div className="w-9 h-9 rounded-lg bg-nt-teal flex items-center justify-center text-nt-bg font-display font-semibold text-sm">PA</div>
-          <div className="font-display text-xl text-nt-text">PrintAssure</div>
+        <div className="flex flex-col items-center mb-8">
+          <img src="/logo-mark.png" alt="PrintAssure" className="w-14 h-14 object-contain" />
+          <div className="font-display text-xl text-nt-text mt-3">PrintAssure</div>
+          <div className="text-xs text-nt-muted mt-0.5">by NeuraTrace</div>
         </div>
         <div className="nt-card p-7">
           <h1 className="font-display text-lg text-nt-text mb-1">Print Control System</h1>
