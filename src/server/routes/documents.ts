@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { documents, documentRevisions, documentApprovalReferences, departments } from '@/db/schema';
 import { PERMISSIONS } from '@/lib/permissions';
 import { recordAuditEvent } from '@/lib/audit';
 import { requireAuth, requirePermission } from '../authz';
+import { generateApprovalReferenceNumber, E_SIGNATURE_ATTESTATION } from '@/lib/approval-reference';
 
 export const documentRoutes = new Hono();
 documentRoutes.use('*', requireAuth);
@@ -34,7 +35,21 @@ documentRoutes.get('/:id', async (c) => {
     .where(eq(documentRevisions.documentId, id))
     .orderBy(desc(documentRevisions.revisionNumber));
 
-  return c.json({ document: doc, revisions });
+  const revisionIds = revisions.map((r) => r.id);
+  const approvalRefs = revisionIds.length
+    ? await db
+        .select()
+        .from(documentApprovalReferences)
+        .where(inArray(documentApprovalReferences.documentRevisionId, revisionIds))
+        .orderBy(desc(documentApprovalReferences.createdAt))
+    : [];
+  const latestRefByRevision = new Map<string, (typeof approvalRefs)[number]>();
+  for (const ref of approvalRefs) {
+    if (!latestRefByRevision.has(ref.documentRevisionId)) latestRefByRevision.set(ref.documentRevisionId, ref);
+  }
+  const revisionsWithApproval = revisions.map((r) => ({ ...r, approvalReference: latestRefByRevision.get(r.id) ?? null }));
+
+  return c.json({ document: doc, revisions: revisionsWithApproval });
 });
 
 // Register a document in the master registry. Works even with no DMS and no
@@ -109,13 +124,22 @@ documentRoutes.post('/', requirePermission(PERMISSIONS.DOCUMENT_REGISTER), async
   return c.json({ document: doc, revision }, 201);
 });
 
-// Approve a document revision. This records that approval happened — the
-// spec forbids pretending any of this constitutes an electronic signature
-// unless sourceRecordType says ELECTRONIC_SIGNATURE.
+// Approve a document revision. This records a real electronic signature —
+// sourceRecordType is explicitly ELECTRONIC_SIGNATURE here, unlike the
+// PAPER_APPROVAL_REFERENCE recorded at registration time for a scanned
+// paper signature (those two are never treated as interchangeable).
 documentRoutes.post('/:id/revisions/:revisionId/approve', requirePermission(PERMISSIONS.DOCUMENT_REVISE), async (c) => {
   const session = c.get('session');
   const documentId = c.req.param('id');
   const revisionId = c.req.param('revisionId');
+  const body = await c.req.json().catch(() => ({}));
+
+  const typedName = String(body.signerFullName ?? '').trim();
+  if (!typedName) return c.json({ error: 'Type your full name to electronically sign this approval' }, 400);
+  if (typedName.toLowerCase() !== session.fullName.trim().toLowerCase()) {
+    return c.json({ error: 'The typed name must match your account name exactly to sign' }, 400);
+  }
+
   const [updated] = await db
     .update(documentRevisions)
     .set({ approvalStatus: 'APPROVED', updatedAt: new Date() })
@@ -124,6 +148,17 @@ documentRoutes.post('/:id/revisions/:revisionId/approve', requirePermission(PERM
   if (!updated) return c.json({ error: 'Not found' }, 404);
 
   const [parentDoc] = await db.select().from(documents).where(eq(documents.id, documentId));
+  const approvalReferenceNumber = generateApprovalReferenceNumber();
+
+  await db.insert(documentApprovalReferences).values({
+    documentRevisionId: revisionId,
+    sourceRecordType: 'ELECTRONIC_SIGNATURE',
+    approvalReferenceNumber,
+    approvedByName: typedName,
+    approvedDate: new Date(),
+    notes: E_SIGNATURE_ATTESTATION,
+    recordedByUserId: session.userId,
+  });
 
   await recordAuditEvent({
     organizationId: session.organizationId,
@@ -131,10 +166,10 @@ documentRoutes.post('/:id/revisions/:revisionId/approve', requirePermission(PERM
     eventType: 'REVISION_APPROVED',
     entityType: 'document_revision',
     entityId: revisionId,
-    summary: `Revision ${updated.revisionLabel} of ${parentDoc?.documentNumber ?? documentId} approved`,
+    summary: `Revision ${updated.revisionLabel} of ${parentDoc?.documentNumber ?? documentId} approved by ${session.fullName} (e-signed, ref ${approvalReferenceNumber})`,
   });
 
-  return c.json({ revision: updated });
+  return c.json({ revision: updated, approvalReferenceNumber });
 });
 
 // Register a new revision — the entry point into Module E recall logic

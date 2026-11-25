@@ -320,6 +320,13 @@ export const printApprovals = pgTable('print_approvals', {
   approverUserId: uuid('approver_user_id').notNull().references(() => users.id),
   decision: varchar('decision', { length: 20 }).notNull(), // APPROVED | REJECTED
   comments: text('comments'),
+  // Populated only for an APPROVED decision — this is the electronic
+  // signature: the approver re-typed their own full name to confirm,
+  // exactly as spec'd for document approvals (see documentApprovalReferences
+  // above). A REJECTED decision isn't an e-signed record, so these stay null.
+  approvalReferenceNumber: varchar('approval_reference_number', { length: 150 }),
+  signerFullName: text('signer_full_name'),
+  attestationStatement: text('attestation_statement'),
   decidedAt: timestamp('decided_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   reqIdx: index('print_approvals_req_idx').on(t.printRequestId),

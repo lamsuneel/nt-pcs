@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   printRequests,
@@ -11,6 +11,7 @@ import {
 import { PERMISSIONS } from '@/lib/permissions';
 import { recordAuditEvent } from '@/lib/audit';
 import { buildCopyIdentifier, generateQrToken } from '@/lib/copy-id';
+import { generateApprovalReferenceNumber, E_SIGNATURE_ATTESTATION } from '@/lib/approval-reference';
 import { buildControlledCopyPdf } from '@/lib/pdf';
 import { storage } from '@/lib/storage';
 import { requireAuth, requirePermission } from '../authz';
@@ -25,7 +26,18 @@ printRoutes.get('/', async (c) => {
     .from(printRequests)
     .where(eq(printRequests.organizationId, session.organizationId))
     .orderBy(desc(printRequests.createdAt));
-  return c.json({ printRequests: rows });
+
+  const ids = rows.map((r) => r.id);
+  const approvals = ids.length
+    ? await db.select().from(printApprovals).where(inArray(printApprovals.printRequestId, ids)).orderBy(desc(printApprovals.decidedAt))
+    : [];
+  const latestByRequest = new Map<string, (typeof approvals)[number]>();
+  for (const a of approvals) {
+    if (!latestByRequest.has(a.printRequestId)) latestByRequest.set(a.printRequestId, a);
+  }
+
+  const withApprovals = rows.map((r) => ({ ...r, latestApproval: latestByRequest.get(r.id) ?? null }));
+  return c.json({ printRequests: withApprovals });
 });
 
 printRoutes.post('/', requirePermission(PERMISSIONS.PRINT_REQUEST), async (c) => {
@@ -80,11 +92,25 @@ printRoutes.post('/:id/approve', requirePermission(PERMISSIONS.PRINT_APPROVE), a
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (existing.status !== 'REQUESTED') return c.json({ error: `Cannot approve a request in status ${existing.status}` }, 400);
 
+  // Electronic signature: the approver must re-type their own full name to
+  // confirm. It must match the name on their account — this isn't a free-text
+  // field, it's standing in for a handwritten signature.
+  const typedName = String(body.signerFullName ?? '').trim();
+  if (!typedName) return c.json({ error: 'Type your full name to electronically sign this approval' }, 400);
+  if (typedName.toLowerCase() !== session.fullName.trim().toLowerCase()) {
+    return c.json({ error: 'The typed name must match your account name exactly to sign' }, 400);
+  }
+
+  const approvalReferenceNumber = generateApprovalReferenceNumber();
+
   await db.insert(printApprovals).values({
     printRequestId: id,
     approverUserId: session.userId,
     decision: 'APPROVED',
     comments: body.comments ?? null,
+    approvalReferenceNumber,
+    signerFullName: typedName,
+    attestationStatement: E_SIGNATURE_ATTESTATION,
   });
 
   const [updated] = await db
@@ -99,10 +125,10 @@ printRoutes.post('/:id/approve', requirePermission(PERMISSIONS.PRINT_APPROVE), a
     eventType: 'PRINT_APPROVED',
     entityType: 'print_request',
     entityId: id,
-    summary: `Print request approved by ${session.fullName}`,
+    summary: `Print request approved by ${session.fullName} (e-signed, ref ${approvalReferenceNumber})`,
   });
 
-  return c.json({ printRequest: updated });
+  return c.json({ printRequest: updated, approvalReferenceNumber });
 });
 
 printRoutes.post('/:id/reject', requirePermission(PERMISSIONS.PRINT_APPROVE), async (c) => {
