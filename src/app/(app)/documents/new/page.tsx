@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWRLite from '@/lib/use-swr-lite';
 import { PageHeader, Card, Button, RequirePermission } from '@/components/ui';
@@ -10,6 +10,15 @@ const DOC_TYPES = [
   'SOP', 'WI', 'BMR', 'BPR', 'STP', 'SPECIFICATION', 'FORMAT_CHECKLIST',
   'EQUIPMENT_SOP', 'CLEANING_PROCEDURE', 'CALIBRATION_PROCEDURE', 'SAFETY_PROCEDURE', 'QUALITY_MANUAL',
 ];
+
+interface DriveSearchResult {
+  externalRef: string;
+  name: string;
+  modifiedTime: string | null;
+  webViewLink: string | null;
+  linkedDocumentId: string | null;
+  linkedDocumentNumber: string | null;
+}
 
 export default function NewDocumentPage() {
   const router = useRouter();
@@ -23,8 +32,44 @@ export default function NewDocumentPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
+  // Google Drive search — lets the Controller pick up the already-approved
+  // source file right here instead of issuing first and linking Drive
+  // separately afterward. Optional: the document can still be issued with
+  // no digital source (hasNoFileYet), same as before.
+  const [driveQuery, setDriveQuery] = useState('');
+  const [driveResults, setDriveResults] = useState<DriveSearchResult[]>([]);
+  const [driveNote, setDriveNote] = useState('');
+  const [driveSearching, setDriveSearching] = useState(false);
+  const [selectedDrive, setSelectedDrive] = useState<DriveSearchResult | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   function set<K extends keyof typeof form>(k: K, v: typeof form[K]) {
     setForm((f) => ({ ...f, [k]: v }));
+  }
+
+  function onDriveQueryChange(value: string) {
+    setDriveQuery(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!value.trim()) {
+      setDriveResults([]);
+      setDriveNote('');
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      setDriveSearching(true);
+      const res = await fetch(`/api/integrations/google-drive/search?q=${encodeURIComponent(value)}`);
+      const body = await res.json().catch(() => ({ results: [] }));
+      setDriveSearching(false);
+      setDriveResults(body.results ?? []);
+      setDriveNote(body.note ?? '');
+    }, 350);
+  }
+
+  function pickDrive(result: DriveSearchResult) {
+    setSelectedDrive(result);
+    if (!form.title) set('title', result.name.replace(/\.[^/.]+$/, ''));
+    setDriveQuery('');
+    setDriveResults([]);
   }
 
   async function submit(e: React.FormEvent) {
@@ -42,7 +87,9 @@ export default function NewDocumentPage() {
         siteId: form.siteId,
         masterCopyLocation: form.masterCopyLocation,
         revisionLabel: form.revisionLabel,
-        sourceFileProvided: false,
+        sourceFileProvided: !!selectedDrive,
+        externalProvider: selectedDrive ? 'GOOGLE_DRIVE' : undefined,
+        externalRef: selectedDrive ? selectedDrive.externalRef : undefined,
         paperApprovalReference: form.hasApprovalRef
           ? { referenceNumber: form.referenceNumber, approvedByName: form.approvedByName }
           : undefined,
@@ -60,6 +107,7 @@ export default function NewDocumentPage() {
 
   const departments = org?.departments ?? [];
   const sites = org?.sites ?? [];
+  const willBeApproved = form.hasApprovalRef && form.approvedByName.trim().length > 0;
 
   return (
     <div className="max-w-2xl">
@@ -79,6 +127,47 @@ export default function NewDocumentPage() {
           </div>
           <Field label="Title">
             <input className="nt-input" value={form.title} onChange={(e) => set('title', e.target.value)} required />
+          </Field>
+          <Field label="Source file (search Google Drive, optional)">
+            {selectedDrive ? (
+              <div className="flex items-center justify-between nt-input">
+                <span className="text-sm text-nt-text truncate">{selectedDrive.name}</span>
+                <button type="button" onClick={() => setSelectedDrive(null)} className="text-xs text-nt-muted hover:text-nt-blocked ml-2 shrink-0">
+                  Change
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <input
+                  className="nt-input"
+                  value={driveQuery}
+                  onChange={(e) => onDriveQueryChange(e.target.value)}
+                  placeholder="Start typing a file name to search Google Drive..."
+                />
+                {driveSearching && <div className="text-xs text-nt-muted mt-1">Searching Google Drive...</div>}
+                {driveNote && !driveSearching && <div className="text-xs text-nt-muted mt-1">{driveNote}</div>}
+                {driveResults.length > 0 && (
+                  <div className="absolute z-10 mt-1 w-full nt-card max-h-64 overflow-y-auto">
+                    {driveResults.map((r) => (
+                      <button
+                        key={r.externalRef}
+                        type="button"
+                        onClick={() => pickDrive(r)}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-nt-panel2 border-b border-nt-border/60 last:border-0"
+                      >
+                        <div className="text-nt-text">{r.name}</div>
+                        {r.linkedDocumentId && (
+                          <div className="text-xs mt-0.5 text-nt-flagged">Already linked to {r.linkedDocumentNumber} — picking it will re-link it here instead</div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <p className="text-nt-muted text-xs mt-1">
+              Leave blank to issue with no digital source yet (paper master only) — you can link Drive from the document's page later.
+            </p>
           </Field>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Site">
@@ -112,17 +201,22 @@ export default function NewDocumentPage() {
                   <input className="nt-input" value={form.referenceNumber} onChange={(e) => set('referenceNumber', e.target.value)} />
                 </Field>
                 <Field label="Approved by (name)">
-                  <input className="nt-input" value={form.approvedByName} onChange={(e) => set('approvedByName', e.target.value)} />
+                  <input className="nt-input" value={form.approvedByName} onChange={(e) => set('approvedByName', e.target.value)} placeholder="Required to issue as APPROVED" />
                 </Field>
               </div>
             )}
             <p className="text-nt-muted text-xs mt-2">
               This records evidence of the existing paper approval. It is not an electronic signature.
             </p>
+            <p className={`text-xs mt-2 ${willBeApproved ? 'text-nt-compliant' : 'text-nt-flagged'}`}>
+              {willBeApproved
+                ? 'This document will be issued as APPROVED — a Requestor can select it for a controlled print immediately.'
+                : 'Without an approver name, this is issued as DRAFT — a Document Controller must approve it on its own page before it can be printed.'}
+            </p>
           </div>
 
           {error && <div className="text-nt-blocked text-sm">{error}</div>}
-          <Button type="submit" disabled={submitting}>{submitting ? 'Issuing...' : 'Issue Document'}</Button>
+          <Button type="submit" disabled={submitting}>{submitting ? 'Issuing...' : willBeApproved ? 'Issue as Approved Document' : 'Issue Document (Draft)'}</Button>
         </form>
       </Card>
       </RequirePermission>

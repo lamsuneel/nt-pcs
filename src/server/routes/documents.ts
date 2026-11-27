@@ -183,6 +183,15 @@ documentRoutes.post('/', requirePermission(PERMISSIONS.DOCUMENT_REGISTER), async
   const [dept] = await db.select().from(departments).where(eq(departments.id, body.departmentId));
   if (!dept) return c.json({ error: 'Unknown department' }, 400);
 
+  // A paper approval reference is only real evidence if it actually names
+  // who approved it — an empty/unchecked form shouldn't be able to produce
+  // an APPROVED document. If it's genuine, this document is documenting
+  // something *already* approved outside the system (on paper, or already
+  // signed off in Drive) — so revision 1 starts APPROVED, not DRAFT, and is
+  // immediately selectable in Request Controlled Print. Without it, revision
+  // 1 is a real new DRAFT that still needs to go through approval here.
+  const hasRealApprovalEvidence = !!body.paperApprovalReference?.approvedByName?.trim();
+
   const [doc] = await db
     .insert(documents)
     .values({
@@ -196,6 +205,8 @@ documentRoutes.post('/', requirePermission(PERMISSIONS.DOCUMENT_REGISTER), async
       confidentiality: body.confidentiality ?? 'PUBLIC_INTERNAL',
       masterCopyLocation: body.masterCopyLocation ?? null,
       hasNoFileYet: !body.sourceFileProvided,
+      externalProvider: body.externalProvider ?? null,
+      externalRef: body.externalRef ?? null,
       createdByUserId: session.userId,
     })
     .returning();
@@ -208,7 +219,7 @@ documentRoutes.post('/', requirePermission(PERMISSIONS.DOCUMENT_REGISTER), async
       documentId: doc.id,
       revisionNumber: 1,
       revisionLabel: body.revisionLabel ?? '01',
-      approvalStatus: 'DRAFT',
+      approvalStatus: hasRealApprovalEvidence ? 'APPROVED' : 'DRAFT',
       effectiveDate: body.effectiveDate ?? null,
       reviewDueDate: body.reviewDueDate ?? null,
       changeSummary: 'Initial registration',
@@ -235,10 +246,10 @@ documentRoutes.post('/', requirePermission(PERMISSIONS.DOCUMENT_REGISTER), async
   await recordAuditEvent({
     organizationId: session.organizationId,
     userId: session.userId,
-    eventType: 'DOCUMENT_REGISTERED',
+    eventType: hasRealApprovalEvidence ? 'DOCUMENT_REGISTERED_APPROVED' : 'DOCUMENT_REGISTERED',
     entityType: 'document',
     entityId: doc.id,
-    summary: `Registered ${doc.documentNumber} — ${doc.title} (rev ${revision.revisionLabel})`,
+    summary: `Registered ${doc.documentNumber} — ${doc.title} (rev ${revision.revisionLabel}, ${revision.approvalStatus})`,
     newValue: { documentNumber: doc.documentNumber, revisionLabel: revision.revisionLabel },
   });
 
