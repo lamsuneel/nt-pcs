@@ -16,7 +16,7 @@
 import { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { organizations, integrations, printRequests, departments, documents } from '@/db/schema';
+import { organizations, integrations, printRequests, departments, documents, documentRevisions } from '@/db/schema';
 import { recordAuditEvent } from '@/lib/audit';
 import { getAdapter, type IntegrationProviderKey } from '@/lib/integrations/adapter';
 import { googleDriveAdapter } from '@/lib/integrations/google-drive';
@@ -146,12 +146,40 @@ integrationRoutes.get('/google-drive/resolve', requireAuth, async (c) => {
 
   let resolved;
   try {
-    resolved = await googleDriveAdapter.resolveDocument(fileId);
+    // Verify as the signed-in user — they're the one who found this file in
+    // their own Drive search, so the live double-check should run under
+    // their identity too, not a separate system subject that may not even
+    // have visibility into their file.
+    resolved = await googleDriveAdapter.resolveDocument(fileId, { verifyAsEmail: session.email });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ error: `Google Drive adapter error: ${message}` }, 502);
   }
   if (!resolved) {
+    // Distinguish "genuinely not approved/linked" from "it IS approved and
+    // linked, but the live re-check with Google failed" — the second is a
+    // much more actionable message (and was previously indistinguishable
+    // from the first, which made this very hard to debug).
+    const [existingDoc] = await db
+      .select()
+      .from(documents)
+      .where(and(eq(documents.externalProvider, 'GOOGLE_DRIVE'), eq(documents.externalRef, fileId)))
+      .limit(1);
+    if (existingDoc?.currentRevisionId) {
+      const [existingRevision] = await db
+        .select()
+        .from(documentRevisions)
+        .where(eq(documentRevisions.id, existingDoc.currentRevisionId))
+        .limit(1);
+      if (existingRevision?.approvalStatus === 'APPROVED') {
+        return c.json(
+          {
+            error: `${existingDoc.documentNumber} is approved and linked to this file, but Google couldn't re-confirm it live just now (as ${session.email}) — see the server logs for the Drive API's exact response. Try again in a moment.`,
+          },
+          502
+        );
+      }
+    }
     return c.json(
       { error: 'This Drive file isn’t linked to an approved controlled document yet. Link it from the document’s page first.' },
       404

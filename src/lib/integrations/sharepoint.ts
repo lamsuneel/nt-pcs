@@ -18,7 +18,7 @@ export const sharePointAdapter: IntegrationAdapter = {
   providerKey: 'SHAREPOINT',
   displayName: 'SharePoint',
 
-  async resolveDocument(_externalRef: string): Promise<ResolvedExternalDocument | null> {
+  async resolveDocument(_externalRef: string, _opts?: { verifyAsEmail?: string }): Promise<ResolvedExternalDocument | null> {
     throw new Error(
       'SharePoint integration is not wired up yet — needs a Microsoft 365 Graph API connection. ' +
         'Set up a Microsoft 365 Developer Program sandbox, then this adapter can be implemented ' +

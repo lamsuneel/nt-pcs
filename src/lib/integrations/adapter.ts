@@ -46,7 +46,13 @@ export interface IntegrationAdapter {
   // adapter failures. A thrown error means the adapter itself (auth,
   // network, malformed payload) failed, which the webhook route reports as
   // a clear 502 scoped to that one provider.
-  resolveDocument(externalRef: string): Promise<ResolvedExternalDocument | null>;
+  //
+  // opts.verifyAsEmail: when a signed-in PrintAssure user is the one asking
+  // (the interactive "pick from search" path), live verification should run
+  // as THAT person — they're the one who could see the file in search in
+  // the first place. Omitted for the webhook path, which has no signed-in
+  // user and falls back to the adapter's own system/default subject.
+  resolveDocument(externalRef: string, opts?: { verifyAsEmail?: string }): Promise<ResolvedExternalDocument | null>;
 }
 
 const registry = new Map<IntegrationProviderKey, IntegrationAdapter>();

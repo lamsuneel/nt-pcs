@@ -25,28 +25,41 @@ import { eq, and } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { documents, documentRevisions } from '@/db/schema';
 import type { IntegrationAdapter, ResolvedExternalDocument } from './adapter';
-import { getDriveAccessTokenForSystem } from './google-service-account';
+import { getDriveAccessTokenForSystem, getDriveAccessTokenForUser } from './google-service-account';
 
-async function verifyLiveInDrive(fileId: string): Promise<boolean> {
-  // The automated (webhook) path has no signed-in PrintAssure user to
-  // impersonate, so it uses the dedicated system subject
-  // (GOOGLE_WORKSPACE_DEFAULT_SUBJECT). The interactive search path
-  // (see server/routes/integrations.ts) impersonates the actual logged-in
-  // user instead, via getDriveAccessTokenForUser.
-  const accessToken = await getDriveAccessTokenForSystem();
+// Bug fixed here: this used to always impersonate the system/default
+// subject (GOOGLE_WORKSPACE_DEFAULT_SUBJECT), even when called from the
+// interactive "pick a search result" path. That meant a file visible in a
+// Requestor's own Drive search (found using THEIR token) could then fail
+// this live-verification step if the system subject itself didn't have
+// access to that same file — silently blocking selection of an otherwise
+// perfectly approved, linked document, with no indication why. Now the
+// caller can say who to verify as; interactive calls pass the signed-in
+// user's own email, matching who actually found the file.
+async function verifyLiveInDrive(fileId: string, verifyAsEmail?: string): Promise<boolean> {
+  const accessToken = verifyAsEmail
+    ? await getDriveAccessTokenForUser(verifyAsEmail)
+    : await getDriveAccessTokenForSystem();
   if (!accessToken) {
-    // Not configured yet — this is an expected, non-error state. The core
-    // DB-backed match above is still the real gate; this is defense in
-    // depth, not the control itself.
+    // Not configured yet, or delegation not granted for this subject — an
+    // expected, non-error state. The core DB-backed match is still the
+    // real gate; this is defense in depth, not the control itself.
     return true;
   }
   try {
-    const res = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,trashed`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    let res: Response;
+    try {
+      res = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,trashed`,
+        { headers: { Authorization: `Bearer ${accessToken}` }, signal: controller.signal }
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
     if (!res.ok) {
-      console.error(`[google-drive adapter] Drive API returned ${res.status} for file ${fileId}`);
+      console.error(`[google-drive adapter] Drive API returned ${res.status} for file ${fileId} (verified as ${verifyAsEmail ?? 'system subject'})`);
       return false;
     }
     const data = (await res.json()) as { trashed?: boolean };
@@ -64,7 +77,7 @@ export const googleDriveAdapter: IntegrationAdapter = {
   providerKey: 'GOOGLE_DRIVE',
   displayName: 'Google Drive',
 
-  async resolveDocument(externalRef: string): Promise<ResolvedExternalDocument | null> {
+  async resolveDocument(externalRef: string, opts?: { verifyAsEmail?: string }): Promise<ResolvedExternalDocument | null> {
     const [doc] = await db
       .select()
       .from(documents)
@@ -79,7 +92,7 @@ export const googleDriveAdapter: IntegrationAdapter = {
       .limit(1);
     if (!revision || revision.approvalStatus !== 'APPROVED') return null;
 
-    const stillValid = await verifyLiveInDrive(externalRef);
+    const stillValid = await verifyLiveInDrive(externalRef, opts?.verifyAsEmail);
     if (!stillValid) return null;
 
     return {

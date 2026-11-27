@@ -54,6 +54,7 @@ export default function NewPrintRequestPage() {
   // for a Controller to classify and approve. The print request still can't
   // be submitted until that approval happens — see print.ts.
   const [registering, setRegistering] = useState<string | null>(null);
+  const [resolving, setResolving] = useState<string | null>(null);
 
   // If arriving with a documentId already set (e.g. from a document's own
   // "Request Controlled Print" button), show its name instead of blanking
@@ -106,16 +107,30 @@ export default function NewPrintRequestPage() {
 
   async function pickDriveResult(result: DriveSearchResult) {
     setResolveError('');
-    const res = await fetch(`/api/integrations/google-drive/resolve?fileId=${encodeURIComponent(result.externalRef)}`);
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setResolveError(body.error || 'This file could not be resolved to an approved document.');
-      return;
+    setResolving(result.externalRef);
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12000);
+      const res = await fetch(`/api/integrations/google-drive/resolve?fileId=${encodeURIComponent(result.externalRef)}`, { signal: controller.signal });
+      clearTimeout(timeout);
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setResolveError(body.error || 'This file could not be resolved to an approved document.');
+        return;
+      }
+      set('documentId', body.documentId);
+      setSelectedLabel(`${body.documentNumber} — rev ${body.revisionLabel} (from Google Drive: ${result.name})`);
+      setDriveQuery('');
+      setDriveResults([]);
+    } catch (err) {
+      setResolveError(
+        err instanceof Error && err.name === 'AbortError'
+          ? 'Resolving this file timed out — try again.'
+          : 'Could not reach the server to resolve this file — try again.'
+      );
+    } finally {
+      setResolving(null);
     }
-    set('documentId', body.documentId);
-    setSelectedLabel(`${body.documentNumber} — rev ${body.revisionLabel} (from Google Drive: ${result.name})`);
-    setDriveQuery('');
-    setDriveResults([]);
   }
 
   // Click an unlinked result: create its tracking record immediately, then
@@ -206,10 +221,12 @@ export default function NewPrintRequestPage() {
                         key={r.externalRef}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-nt-panel2 border-b border-nt-border/60 last:border-0 flex items-center justify-between gap-2"
                       >
-                        <button type="button" onClick={() => (r.linkedDocumentId ? pickDriveResult(r) : undefined)} className="text-left flex-1 min-w-0" disabled={!r.linkedDocumentId}>
+                        <button type="button" onClick={() => (r.linkedDocumentId ? pickDriveResult(r) : undefined)} className="text-left flex-1 min-w-0" disabled={!r.linkedDocumentId || resolving === r.externalRef}>
                           <div className="text-nt-text truncate">{r.name}</div>
                           <div className="text-xs mt-0.5">
-                            {r.linkedDocumentId ? (
+                            {resolving === r.externalRef ? (
+                              <span className="text-nt-muted">Resolving...</span>
+                            ) : r.linkedDocumentId ? (
                               <span className="text-nt-compliant">✓ Linked — {r.linkedDocumentNumber}</span>
                             ) : (
                               <span className="text-nt-flagged">Not yet linked to a controlled document</span>
