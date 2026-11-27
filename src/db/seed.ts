@@ -81,10 +81,13 @@ async function main() {
   }[] = [
     { key: 'admin', fullName: 'Sanjay Rao', email: 'admin@demo-pharma.local', role: 'SYSTEM_ADMIN' },
     { key: 'qaHead', fullName: 'Dr. Lakshmi Narayan', email: 'qa.head@demo-pharma.local', role: 'QA_HEAD', deptCode: 'QA' },
-    { key: 'docController', fullName: 'Priya Menon', email: 'srinivas.mullapudi@neuratrace.co', role: 'DOCUMENT_CONTROLLER', deptCode: 'QA' },
+    { key: 'docController', fullName: 'Priya Menon', email: 'doc.controller@demo-pharma.local', role: 'DOCUMENT_CONTROLLER', deptCode: 'QA' },
     { key: 'qaManager', fullName: 'Arjun Reddy', email: 'qa.manager@demo-pharma.local', role: 'QA_MANAGER', deptCode: 'QA' },
     { key: 'prodHead', fullName: 'Suresh Kumar', email: 'production.head@demo-pharma.local', role: 'DEPARTMENT_HEAD', deptCode: 'PROD' },
-    { key: 'qaExecutive', fullName: 'Deepa Varma', email: 'qa.executive@demo-pharma.local', role: 'EMPLOYEE', deptCode: 'QA' },
+    // Real Workspace mailbox (granted Drive domain-wide delegation) so the
+    // Requestor persona — who is who actually searches Drive when
+    // requesting a print — can exercise live Drive search end-to-end.
+    { key: 'qaExecutive', fullName: 'Deepa Varma', email: 'srinivas.mullapudi@neuratrace.co', role: 'EMPLOYEE', deptCode: 'QA' },
     { key: 'prodEmployee', fullName: 'Ravi Teja', email: 'production.employee@demo-pharma.local', role: 'EMPLOYEE', deptCode: 'PROD' },
     { key: 'auditor', fullName: 'Nandini Iyer', email: 'auditor@demo-pharma.local', role: 'AUDITOR' },
   ];
