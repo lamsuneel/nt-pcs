@@ -124,6 +124,34 @@ export const sourceRecordTypeEnum = pgEnum('source_record_type', [
   'ELECTRONIC_REGULATED_RECORD',
 ]);
 
+// MVP pillars: Print Management (printers/printJobs), Print Review
+// (overlayProfiles), Integration (printJobSourceEnum), minimal Request ->
+// Controller flow (printRequests.printerId/isUrgent/source* below).
+export const printerStatusEnum = pgEnum('printer_status', ['ACTIVE', 'PAUSED', 'CIRCUIT_OPEN']);
+
+export const printJobStatusEnum = pgEnum('print_job_status', [
+  'QUEUED',
+  'DISPATCHED',
+  'CONFIRMED',
+  'PARTIAL',
+  'FAILED',
+  'DEAD_LETTER',
+]);
+
+export const printJobPriorityEnum = pgEnum('print_job_priority', ['STANDARD', 'URGENT']);
+
+// NATIVE = submitted from inside PrintAssure's own UI. The rest are inbound
+// print-trigger API sources (Epic H) — GOOGLE_DRIVE is the adapter built and
+// tested first; SHAREPOINT is the prioritized real target, wired to the same
+// adapter contract once a Microsoft 365 developer sandbox is available.
+export const printJobSourceEnum = pgEnum('print_job_source', [
+  'NATIVE',
+  'GOOGLE_DRIVE',
+  'SHAREPOINT',
+  'MASTERCONTROL',
+  'VEEVA',
+]);
+
 // ============================================================
 // TENANCY / ORG STRUCTURE
 // ============================================================
@@ -242,6 +270,10 @@ export const documents = pgTable('documents', {
   hasNoFileYet: boolean('has_no_file_yet').notNull().default(false),
   isActive: boolean('is_active').notNull().default(true),
   currentRevisionId: uuid('current_revision_id'),
+  // Print Review (Epic E): which overlay profile (logo + stamp fields) is
+  // used when this document is printed. Assigned at registration time, not
+  // resolved at print time — avoids the runtime profile-matching bottleneck.
+  overlayProfileId: uuid('overlay_profile_id'),
   createdByUserId: uuid('created_by_user_id').notNull().references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -302,7 +334,14 @@ export const printRequests = pgTable('print_requests', {
   destinationLocation: text('destination_location').notNull(),
   intendedPurpose: text('intended_purpose'),
   reasonForPrinting: text('reason_for_printing'),
-  printer: varchar('printer', { length: 150 }),
+  printer: varchar('printer', { length: 150 }), // legacy free-text printer name, kept for back-compat
+  printerId: uuid('printer_id'), // Epic F: the actual registered, plant-scoped printer
+  isUrgent: boolean('is_urgent').notNull().default(false), // Epic F11: priority queuing
+  // Epic H: which system this request originated from, and that system's own
+  // reference for the source document (e.g. a Google Drive file ID or a
+  // SharePoint item ID). NATIVE requests leave sourceRef null.
+  source: printJobSourceEnum('source').notNull().default('NATIVE'),
+  sourceRef: text('source_ref'),
   classification: printClassificationEnum('classification').notNull().default('CONTROLLED'),
   reviewDueDate: timestamp('review_due_date', { withTimezone: true }),
   status: printRequestStatusEnum('status').notNull().default('REQUESTED'),
@@ -536,6 +575,90 @@ export const integrationSyncLogs = pgTable('integration_sync_logs', {
   errorMessage: text('error_message'),
 }, (t) => ({
   integrationIdx: index('integration_sync_logs_integration_idx').on(t.integrationId),
+}));
+
+// ============================================================
+// MODULE H: PRINT MANAGEMENT, PRINT REVIEW & QUEUE (gold standard)
+// ============================================================
+
+// Epic E — Print Review: a configurable overlay (logo + stamp fields) that
+// replaces a hardcoded footer. Stamp fields match real controlled-copy
+// stamping conventions (MASTER COPY, REVIEWED — NO CHANGE, Next Review Date,
+// Reviewed By, Date, etc.), each with its own label/value/position so the
+// Document Controller can lay them out and preview exactly what will print.
+export const overlayProfiles = pgTable('overlay_profiles', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  name: text('name').notNull(),
+  logoFileKey: text('logo_file_key'),
+  paperSize: varchar('paper_size', { length: 10 }).notNull().default('A4'),
+  // Array of { key, label, value, page: 'first'|'all', x, y, fontSize }
+  stampFields: jsonb('stamp_fields').notNull().default(sql`'[]'::jsonb`),
+  isDefault: boolean('is_default').notNull().default(false),
+  createdByUserId: uuid('created_by_user_id').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  orgIdx: index('overlay_profiles_org_idx').on(t.organizationId),
+}));
+
+// Epic F — Printer & Queue Management: printers are scoped to a plant
+// (siteId), never addressed by name alone, since the same printer name can
+// recur across plants. status/consecutiveFailures/circuitOpenUntil back the
+// F9 circuit breaker; a printer with status=CIRCUIT_OPEN is skipped by the
+// dispatcher until circuitOpenUntil passes and it is health-checked again.
+export const printers = pgTable('printers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  siteId: uuid('site_id').notNull().references(() => sites.id),
+  name: text('name').notNull(),
+  connectionEndpoint: text('connection_endpoint'), // null = simulated driver (no real printer hardware yet)
+  supportedPaperSizes: jsonb('supported_paper_sizes').notNull().default(sql`'["A4"]'::jsonb`),
+  isApproved: boolean('is_approved').notNull().default(true),
+  status: printerStatusEnum('status').notNull().default('ACTIVE'),
+  consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+  circuitOpenUntil: timestamp('circuit_open_until', { withTimezone: true }),
+  lastHealthCheckAt: timestamp('last_health_check_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  orgIdx: index('printers_org_idx').on(t.organizationId),
+  siteIdx: index('printers_site_idx').on(t.siteId),
+}));
+
+// One row per dispatched print attempt. A print_request (or an API-triggered
+// request) produces one print_job per copy; BullMQ gives each printer its own
+// isolated queue (bullJobId/queueName), so one printer's backlog never delays
+// another's (F2). attempts/lastError back the F7 retry-with-backoff engine;
+// a job that exhausts its retries moves to DEAD_LETTER (F8) rather than
+// vanishing silently.
+export const printJobs = pgTable('print_jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  printRequestId: uuid('print_request_id').references(() => printRequests.id),
+  copyId: uuid('copy_id').references(() => controlledCopies.id),
+  printerId: uuid('printer_id').notNull().references(() => printers.id),
+  queueName: varchar('queue_name', { length: 150 }).notNull(), // one BullMQ queue per printer
+  bullJobId: text('bull_job_id'),
+  status: printJobStatusEnum('status').notNull().default('QUEUED'),
+  priority: printJobPriorityEnum('priority').notNull().default('STANDARD'),
+  source: printJobSourceEnum('source').notNull().default('NATIVE'),
+  sourceRef: text('source_ref'),
+  requestedPages: integer('requested_pages').notNull(),
+  confirmedPages: integer('confirmed_pages'), // F4: expected-vs-confirmed partial-print detection
+  attempts: integer('attempts').notNull().default(0),
+  lastError: text('last_error'),
+  exceptionReason: text('exception_reason'), // F6: logged printer-whitelist exception
+  exceptionGrantedByUserId: uuid('exception_granted_by_user_id').references(() => users.id),
+  exceptionExpiresAt: timestamp('exception_expires_at', { withTimezone: true }),
+  queuedAt: timestamp('queued_at', { withTimezone: true }).notNull().defaultNow(),
+  dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  orgIdx: index('print_jobs_org_idx').on(t.organizationId),
+  printerIdx: index('print_jobs_printer_idx').on(t.printerId),
+  statusIdx: index('print_jobs_status_idx').on(t.status),
 }));
 
 // ============================================================

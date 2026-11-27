@@ -52,11 +52,19 @@ export const ROLE_PERMISSIONS: Record<RoleName, PermissionKey[]> = {
     PERMISSIONS.DOCUMENT_READ,
     PERMISSIONS.DOCUMENT_REGISTER,
     PERMISSIONS.DOCUMENT_REVISE,
+    // MVP (Epic B, minimal): the Document Controller is the single
+    // acknowledgment step — request -> controller, no separate QA-approve
+    // role in this scope — so PRINT_APPROVE is granted here alongside
+    // PRINT_ISSUE. The full configurable multi-step chain (QA_HEAD /
+    // QA_MANAGER approving separately) is unchanged in the data model and
+    // comes back in Phase 2.
+    PERMISSIONS.PRINT_APPROVE,
     PERMISSIONS.PRINT_ISSUE,
     PERMISSIONS.COPY_ISSUE,
     PERMISSIONS.COPY_INVENTORY_MANAGE,
     PERMISSIONS.RECALL_INITIATE,
     PERMISSIONS.AUDIT_READ,
+    PERMISSIONS.EXCEPTION_APPROVE,
   ],
   QA_MANAGER: [
     PERMISSIONS.DOCUMENT_READ,

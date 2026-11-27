@@ -7,6 +7,7 @@ import {
   controlledCopies,
   documents,
   documentRevisions,
+  overlayProfiles,
 } from '@/db/schema';
 import { PERMISSIONS } from '@/lib/permissions';
 import { recordAuditEvent } from '@/lib/audit';
@@ -14,6 +15,7 @@ import { buildCopyIdentifier, generateQrToken } from '@/lib/copy-id';
 import { generateApprovalReferenceNumber, E_SIGNATURE_ATTESTATION } from '@/lib/approval-reference';
 import { buildControlledCopyPdf } from '@/lib/pdf';
 import { storage } from '@/lib/storage';
+import { enqueuePrintJob } from '@/lib/print-queue/dispatch';
 import { requireAuth, requirePermission } from '../authz';
 
 export const printRoutes = new Hono();
@@ -164,6 +166,55 @@ printRoutes.post('/:id/reject', requirePermission(PERMISSIONS.PRINT_APPROVE), as
   return c.json({ printRequest: updated });
 });
 
+// Epic E6 — Print Review: the Document Controller previews exactly what
+// will print (logo, stamp fields, QR footer) before issuing anything. This
+// renders on demand, stores nothing, and is watermarked so it can never be
+// mistaken for an actual controlled print.
+printRoutes.get('/:id/preview', requirePermission(PERMISSIONS.PRINT_ISSUE), async (c) => {
+  const id = c.req.param('id');
+
+  const [reqRow] = await db.select().from(printRequests).where(eq(printRequests.id, id));
+  if (!reqRow) return c.json({ error: 'Not found' }, 404);
+
+  const [doc] = await db.select().from(documents).where(eq(documents.id, reqRow.documentId));
+  const [revision] = await db.select().from(documentRevisions).where(eq(documentRevisions.id, reqRow.documentRevisionId));
+  if (!doc || !revision) return c.json({ error: 'Document/revision missing' }, 400);
+
+  const overlayProfile = await resolveOverlayProfile(doc.overlayProfileId);
+  const sourceBytes = doc.sourceFileKey ? await storage.getObject(doc.sourceFileKey) : null;
+  const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
+  const markingLabel = reqRow.classification === 'CONTROLLED' ? 'CONTROLLED COPY' : 'UNCONTROLLED REFERENCE COPY';
+
+  const pdfBytes = await buildControlledCopyPdf({
+    documentNumber: doc.documentNumber,
+    documentTitle: doc.title,
+    revisionLabel: revision.revisionLabel,
+    copyIdentifier: `${doc.documentNumber}-REV${revision.revisionLabel}-PREVIEW`,
+    markingLabel,
+    issuedToLabel: reqRow.destinationLocation,
+    printedDateLabel: new Date().toISOString().slice(0, 10),
+    verifyUrl: `${baseUrl}/verify/preview`,
+    sourcePdfBytes: sourceBytes ?? undefined,
+    overlayProfile,
+    previewOnly: true,
+  });
+
+  return new Response(pdfBytes, {
+    headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="preview.pdf"' },
+  });
+});
+
+async function resolveOverlayProfile(overlayProfileId: string | null) {
+  if (!overlayProfileId) return null;
+  const [profile] = await db.select().from(overlayProfiles).where(eq(overlayProfiles.id, overlayProfileId));
+  if (!profile) return null;
+  const logoBytes = profile.logoFileKey ? await storage.getObject(profile.logoFileKey) : null;
+  return {
+    logoBytes: logoBytes ?? undefined,
+    stampFields: (profile.stampFields as any[]) ?? [],
+  };
+}
+
 // Document Controller issues the approved request: generates N PDFs with
 // distinct cryptographically unpredictable copy IDs + QR codes, server-side.
 // A screenshot/browser-print of the source cannot substitute for this path.
@@ -180,6 +231,7 @@ printRoutes.post('/:id/issue', requirePermission(PERMISSIONS.PRINT_ISSUE), async
   if (!doc || !revision) return c.json({ error: 'Document/revision missing' }, 400);
 
   const sourceBytes = doc.sourceFileKey ? await storage.getObject(doc.sourceFileKey) : null;
+  const overlayProfile = await resolveOverlayProfile(doc.overlayProfileId);
   const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
   const markingLabel = reqRow.classification === 'CONTROLLED' ? 'CONTROLLED COPY' : 'UNCONTROLLED REFERENCE COPY';
 
@@ -198,6 +250,7 @@ printRoutes.post('/:id/issue', requirePermission(PERMISSIONS.PRINT_ISSUE), async
       printedDateLabel: new Date().toISOString().slice(0, 10),
       verifyUrl: `${baseUrl}/verify/${qrToken}`,
       sourcePdfBytes: sourceBytes ?? undefined,
+      overlayProfile,
     });
 
     const fileKey = `copies/${doc.organizationId}/${copyIdentifier}.pdf`;
@@ -216,13 +269,35 @@ printRoutes.post('/:id/issue', requirePermission(PERMISSIONS.PRINT_ISSUE), async
         qrToken,
         pdfFileKey: fileKey,
         status: 'PRINTED',
-        printOutcome: 'SUCCEEDED',
+        // Outcome is no longer assumed SUCCEEDED here — the print job just
+        // queued below is what actually dispatches to the printer and
+        // reports back pass/fail/partial (F4/F7/F9). Left null until then.
+        printOutcome: null,
         destinationLocation: reqRow.destinationLocation,
         issuedToDepartmentId: reqRow.departmentId,
         printedAt: new Date(),
       })
       .returning();
     createdCopies.push(copy);
+
+    // Epic F — hand off to the per-printer queue for actual dispatch. If no
+    // printer is registered yet for this org, don't fail the whole issue
+    // flow (the PDF + copy record are still the source of truth) — just
+    // note it so the Document Controller can register one and retry.
+    try {
+      await enqueuePrintJob({
+        organizationId: session.organizationId,
+        printRequestId: id,
+        copyId: copy.id,
+        printerId: reqRow.printerId,
+        requestedPages: copy.pageCount ?? 1,
+        priority: reqRow.isUrgent ? 'URGENT' : 'STANDARD',
+        source: (reqRow.source as any) ?? 'NATIVE',
+        sourceRef: reqRow.sourceRef ?? undefined,
+      });
+    } catch (err) {
+      console.error(`[print.issue] could not enqueue print job for copy ${copy.id}:`, err);
+    }
   }
 
   const [updatedReq] = await db

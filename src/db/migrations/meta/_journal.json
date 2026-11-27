@@ -22,6 +22,13 @@
       "when": 1795577776005,
       "tag": "0002_thankful_power_pack",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795783359401,
+      "tag": "0003_striped_naoko",
+      "breakpoints": true
     }
   ]
 }

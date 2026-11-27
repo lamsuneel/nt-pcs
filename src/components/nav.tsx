@@ -8,6 +8,16 @@ import { PERMISSIONS, PermissionKey } from '@/lib/permissions';
 
 type NavItem = { href: string; label: string; requires?: PermissionKey[] };
 
+// MVP SCOPE TRIM — see PRD "Prioritise and mark only the following areas for
+// MVP" (Print Management, Print Review, Integration, minimal Request ->
+// Controller flow; personas = Document Controller + Requestor only).
+//
+// Nothing below is deleted: every other page/route still exists in the repo
+// and keeps working if linked to directly. This flag only controls what's
+// reachable from the sidebar. Flip it to false (or delete the filter at the
+// bottom of this file) to bring the full nav back for Phase 2.
+const MVP_SCOPE = true;
+
 const NAV_GROUPS: { label: string; tag?: 'pro' | 'max'; items: NavItem[] }[] = [
   {
     label: 'Basic',
@@ -15,6 +25,8 @@ const NAV_GROUPS: { label: string; tag?: 'pro' | 'max'; items: NavItem[] }[] = [
       { href: '/dashboard', label: 'Overview' },
       { href: '/documents', label: 'Document Register' },
       { href: '/print-requests', label: 'Print Requests' },
+      { href: '/printer-queue', label: 'Printer & Queue', requires: [PERMISSIONS.ADMIN_MANAGE, PERMISSIONS.PRINT_ISSUE] },
+      { href: '/overlay-profiles', label: 'Print Review (Overlay & Stamps)', requires: [PERMISSIONS.DOCUMENT_REGISTER] },
       { href: '/copies', label: 'Controlled Copies' },
       { href: '/verify', label: 'QR Verification' },
       { href: '/recalls', label: 'Revision & Recall' },
@@ -43,6 +55,16 @@ const NAV_GROUPS: { label: string; tag?: 'pro' | 'max'; items: NavItem[] }[] = [
   },
 ];
 
+// Links visible in MVP_SCOPE. Everything else above is hidden, not removed.
+const MVP_VISIBLE_HREFS = new Set([
+  '/dashboard',
+  '/documents',
+  '/print-requests',
+  '/printer-queue',
+  '/overlay-profiles',
+  '/copies',
+]);
+
 export function SideNav({ fullName, roles }: { fullName: string; roles: string[] }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -58,7 +80,11 @@ export function SideNav({ fullName, roles }: { fullName: string; roles: string[]
   // moment later once the role's permission set is known.
   const groups = NAV_GROUPS.map((g) => ({
     ...g,
-    items: g.items.filter((i) => loading || !i.requires || canAny(i.requires)),
+    items: g.items.filter(
+      (i) =>
+        (loading || !i.requires || canAny(i.requires)) &&
+        (!MVP_SCOPE || MVP_VISIBLE_HREFS.has(i.href))
+    ),
   })).filter((g) => g.items.length > 0);
 
   return (
