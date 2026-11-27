@@ -41,6 +41,13 @@ export const documentTypeEnum = pgEnum('document_type', [
   'CALIBRATION_PROCEDURE',
   'SAFETY_PROCEDURE',
   'QUALITY_MANUAL',
+  // Set only by the auto-create-on-request flow (Epic H follow-up): a
+  // Requestor picked a Drive file with no existing document record, so one
+  // was created on the spot to give it an immediate tracking ID. A Document
+  // Controller is expected to reclassify it with a real document type and
+  // proper document number during review — this value should never persist
+  // past that point.
+  'PENDING_CLASSIFICATION',
 ]);
 
 export const approvalStatusEnum = pgEnum('approval_status', [

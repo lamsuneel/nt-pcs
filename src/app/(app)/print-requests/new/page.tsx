@@ -45,7 +45,15 @@ export default function NewPrintRequestPage() {
   const [driveSearching, setDriveSearching] = useState(false);
   const [selectedLabel, setSelectedLabel] = useState('');
   const [resolveError, setResolveError] = useState('');
+  const [infoMessage, setInfoMessage] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auto-register-on-select: picking a Drive file that has no document yet
+  // creates one on the spot (DRAFT, documentType PENDING_CLASSIFICATION) so
+  // it has an immediate tracking ID and shows up in the Document Register
+  // for a Controller to classify and approve. The print request still can't
+  // be submitted until that approval happens — see print.ts.
+  const [registering, setRegistering] = useState<string | null>(null);
 
   // If arriving with a documentId already set (e.g. from a document's own
   // "Request Controlled Print" button), show its name instead of blanking
@@ -58,6 +66,16 @@ export default function NewPrintRequestPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docsData, form.documentId]);
 
+  async function runDriveSearch(value: string) {
+    if (!value.trim()) return;
+    setDriveSearching(true);
+    const res = await fetch(`/api/integrations/google-drive/search?q=${encodeURIComponent(value)}`);
+    const body = await res.json().catch(() => ({ results: [] }));
+    setDriveSearching(false);
+    setDriveResults(body.results ?? []);
+    setDriveNote(body.note ?? '');
+  }
+
   function onDriveQueryChange(value: string) {
     setDriveQuery(value);
     setResolveError('');
@@ -67,22 +85,11 @@ export default function NewPrintRequestPage() {
       setDriveNote('');
       return;
     }
-    debounceRef.current = setTimeout(async () => {
-      setDriveSearching(true);
-      const res = await fetch(`/api/integrations/google-drive/search?q=${encodeURIComponent(value)}`);
-      const body = await res.json().catch(() => ({ results: [] }));
-      setDriveSearching(false);
-      setDriveResults(body.results ?? []);
-      setDriveNote(body.note ?? '');
-    }, 350);
+    debounceRef.current = setTimeout(() => runDriveSearch(value), 350);
   }
 
   async function pickDriveResult(result: DriveSearchResult) {
     setResolveError('');
-    if (!result.linkedDocumentId) {
-      setResolveError(`"${result.name}" isn't linked to an approved controlled document yet. Open the document and link it to this Drive file first.`);
-      return;
-    }
     const res = await fetch(`/api/integrations/google-drive/resolve?fileId=${encodeURIComponent(result.externalRef)}`);
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -93,6 +100,34 @@ export default function NewPrintRequestPage() {
     setSelectedLabel(`${body.documentNumber} — rev ${body.revisionLabel} (from Google Drive: ${result.name})`);
     setDriveQuery('');
     setDriveResults([]);
+  }
+
+  // Click an unlinked result: create its tracking record immediately, then
+  // select it. It won't be submittable as a print yet (still DRAFT) — the
+  // success message says so — but it now exists in the Document Register
+  // for a Controller to pick up.
+  async function registerAndSelect(result: DriveSearchResult) {
+    setResolveError('');
+    setInfoMessage('');
+    setRegistering(result.externalRef);
+    const res = await fetch('/api/documents/from-drive-request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ externalRef: result.externalRef, name: result.name }),
+    });
+    const body = await res.json().catch(() => ({}));
+    setRegistering(null);
+    if (!res.ok) {
+      setResolveError(body.error || 'Could not create a tracking record for this file.');
+      return;
+    }
+    const doc = body.document;
+    setDriveQuery('');
+    setDriveResults([]);
+    setInfoMessage(
+      `Tracking ID ${doc.documentNumber} created for "${result.name}" — it's now in the Document Register awaiting QA classification and approval. ` +
+        `You'll be able to submit this print once a Document Controller approves it.`
+    );
   }
 
   function clearSelection() {
@@ -126,7 +161,7 @@ export default function NewPrintRequestPage() {
 
   return (
     <div className="max-w-2xl">
-      <PageHeader title="Request Controlled Print" subtitle="Search Google Drive to pick up the file to print — only approved, linked documents can be selected." />
+      <PageHeader title="Request Controlled Print" subtitle="Search Google Drive to pick up the file to print. Approved documents can be selected directly; an unlinked file gets a tracking ID and goes to QA for classification and approval." />
       <RequirePermission allowed={can(PERMISSIONS.PRINT_REQUEST)} loading={permLoading}>
       <Card>
         <form onSubmit={submit} className="space-y-4">
@@ -149,29 +184,40 @@ export default function NewPrintRequestPage() {
                 {driveSearching && <div className="text-xs text-nt-muted mt-1">Searching Google Drive...</div>}
                 {driveNote && !driveSearching && <div className="text-xs text-nt-muted mt-1">{driveNote}</div>}
                 {driveResults.length > 0 && (
-                  <div className="absolute z-10 mt-1 w-full nt-card max-h-64 overflow-y-auto">
+                  <div className="absolute z-10 mt-1 w-full nt-card max-h-80 overflow-y-auto">
                     {driveResults.map((r) => (
-                      <button
+                      <div
                         key={r.externalRef}
-                        type="button"
-                        onClick={() => pickDriveResult(r)}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-nt-panel2 border-b border-nt-border/60 last:border-0"
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-nt-panel2 border-b border-nt-border/60 last:border-0 flex items-center justify-between gap-2"
                       >
-                        <div className="text-nt-text">{r.name}</div>
-                        <div className="text-xs mt-0.5">
-                          {r.linkedDocumentId ? (
-                            <span className="text-nt-compliant">✓ Linked — {r.linkedDocumentNumber}</span>
-                          ) : (
-                            <span className="text-nt-flagged">Not yet linked to a controlled document</span>
-                          )}
-                        </div>
-                      </button>
+                        <button type="button" onClick={() => (r.linkedDocumentId ? pickDriveResult(r) : undefined)} className="text-left flex-1 min-w-0" disabled={!r.linkedDocumentId}>
+                          <div className="text-nt-text truncate">{r.name}</div>
+                          <div className="text-xs mt-0.5">
+                            {r.linkedDocumentId ? (
+                              <span className="text-nt-compliant">✓ Linked — {r.linkedDocumentNumber}</span>
+                            ) : (
+                              <span className="text-nt-flagged">Not yet linked to a controlled document</span>
+                            )}
+                          </div>
+                        </button>
+                        {!r.linkedDocumentId && (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={() => registerAndSelect(r)}
+                            disabled={registering === r.externalRef}
+                          >
+                            {registering === r.externalRef ? 'Creating...' : 'Request & track'}
+                          </Button>
+                        )}
+                      </div>
                     ))}
                   </div>
                 )}
               </div>
             )}
             {resolveError && <div className="text-nt-blocked text-xs mt-1">{resolveError}</div>}
+            {infoMessage && <div className="text-nt-compliant text-xs mt-1">{infoMessage}</div>}
           </Field>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Number of copies">

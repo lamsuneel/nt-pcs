@@ -1,11 +1,14 @@
 import { Hono } from 'hono';
 import { and, desc, eq, inArray } from 'drizzle-orm';
+import { customAlphabet } from 'nanoid';
 import { db } from '@/db/client';
 import { documents, documentRevisions, documentApprovalReferences, departments } from '@/db/schema';
 import { PERMISSIONS } from '@/lib/permissions';
 import { recordAuditEvent } from '@/lib/audit';
 import { requireAuth, requirePermission } from '../authz';
 import { generateApprovalReferenceNumber, E_SIGNATURE_ATTESTATION } from '@/lib/approval-reference';
+
+const pendingDocNumberSuffix = customAlphabet('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', 6);
 
 export const documentRoutes = new Hono();
 documentRoutes.use('*', requireAuth);
@@ -53,9 +56,12 @@ documentRoutes.get('/:id', async (c) => {
 });
 
 // Print Review (Epic E) + inbound print-trigger mapping (Epic H): assign an
-// overlay profile and/or an external-system reference to a document.
-// Deliberately narrow — only these two concerns, not a general document
-// editor — so it can be gated on DOCUMENT_REGISTER the same as creating one.
+// overlay profile and/or an external-system reference to a document. Also
+// where a Document Controller reclassifies a PENDING_CLASSIFICATION
+// document (see POST /from-drive-request below) with its real document
+// number/type once reviewed — that's the only path that may change
+// documentNumber/documentType/title, and it's still gated on
+// DOCUMENT_REGISTER the same as creating a document from scratch.
 documentRoutes.patch('/:id', requirePermission(PERMISSIONS.DOCUMENT_REGISTER), async (c) => {
   const session = c.get('session');
   const id = c.req.param('id');
@@ -65,6 +71,10 @@ documentRoutes.patch('/:id', requirePermission(PERMISSIONS.DOCUMENT_REGISTER), a
   if ('overlayProfileId' in body) update.overlayProfileId = body.overlayProfileId || null;
   if ('externalProvider' in body) update.externalProvider = body.externalProvider || null;
   if ('externalRef' in body) update.externalRef = body.externalRef || null;
+  if ('documentNumber' in body && body.documentNumber) update.documentNumber = body.documentNumber;
+  if ('documentType' in body && body.documentType) update.documentType = body.documentType;
+  if ('title' in body && body.title) update.title = body.title;
+  if ('departmentId' in body && body.departmentId) update.departmentId = body.departmentId;
 
   const [updated] = await db
     .update(documents)
@@ -72,7 +82,95 @@ documentRoutes.patch('/:id', requirePermission(PERMISSIONS.DOCUMENT_REGISTER), a
     .where(and(eq(documents.id, id), eq(documents.organizationId, session.organizationId)))
     .returning();
   if (!updated) return c.json({ error: 'Not found' }, 404);
+
+  if ('documentNumber' in body || 'documentType' in body) {
+    await recordAuditEvent({
+      organizationId: session.organizationId,
+      userId: session.userId,
+      eventType: 'DOCUMENT_RECLASSIFIED',
+      entityType: 'document',
+      entityId: updated.id,
+      summary: `${updated.documentNumber} reclassified by ${session.fullName}`,
+    });
+  }
+
   return c.json({ document: updated });
+});
+
+// Epic H follow-up — a Requestor picking an unlinked Drive file at print-
+// request time gets an immediate tracking ID for that file's lifecycle,
+// instead of being blocked until a Document Controller pre-registers it.
+// This creates a real document + revision 1 in DRAFT (documentType
+// PENDING_CLASSIFICATION) so it shows up in the Document Register right
+// away for review — but a DRAFT document still cannot be selected for an
+// actual print (see print.ts POST / which requires the current revision to
+// be APPROVED), so the compliance gate is unchanged. Idempotent: calling
+// this twice for the same externalRef returns the existing record rather
+// than creating a duplicate.
+documentRoutes.post('/from-drive-request', requirePermission(PERMISSIONS.PRINT_REQUEST), async (c) => {
+  const session = c.get('session');
+  const body = await c.req.json().catch(() => ({}));
+  const externalRef = String(body.externalRef ?? '').trim();
+  const name = String(body.name ?? '').trim();
+  if (!externalRef || !name) return c.json({ error: 'externalRef and name are required' }, 400);
+  if (!session.siteId || !session.departmentId) {
+    return c.json({ error: 'Your account has no site/department assigned — ask an admin to set one before requesting a new document from Drive.' }, 400);
+  }
+
+  const [existing] = await db
+    .select()
+    .from(documents)
+    .where(
+      and(
+        eq(documents.organizationId, session.organizationId),
+        eq(documents.externalProvider, 'GOOGLE_DRIVE'),
+        eq(documents.externalRef, externalRef)
+      )
+    )
+    .limit(1);
+  if (existing) return c.json({ document: existing, created: false });
+
+  const [doc] = await db
+    .insert(documents)
+    .values({
+      organizationId: session.organizationId,
+      siteId: session.siteId,
+      documentNumber: `PEND-${pendingDocNumberSuffix()}`,
+      title: name,
+      documentType: 'PENDING_CLASSIFICATION',
+      departmentId: session.departmentId,
+      hasNoFileYet: false,
+      externalProvider: 'GOOGLE_DRIVE',
+      externalRef,
+      createdByUserId: session.userId,
+    })
+    .returning();
+
+  const [revision] = await db
+    .insert(documentRevisions)
+    .values({
+      documentId: doc.id,
+      revisionNumber: 1,
+      revisionLabel: '01',
+      approvalStatus: 'DRAFT',
+      changeSummary: `Auto-created by ${session.fullName} when requesting a print from Google Drive — pending Document Controller review.`,
+      createdByUserId: session.userId,
+    })
+    .returning();
+
+  await db.update(documents).set({ currentRevisionId: revision.id }).where(eq(documents.id, doc.id));
+
+  await recordAuditEvent({
+    organizationId: session.organizationId,
+    userId: session.userId,
+    eventType: 'DOCUMENT_AUTO_REGISTERED_FROM_REQUEST',
+    entityType: 'document',
+    entityId: doc.id,
+    summary: `${doc.documentNumber} — "${doc.title}" auto-registered (tracking ID) from a Google Drive print request by ${session.fullName}; awaiting Document Controller classification and approval.`,
+    newValue: { externalRef, revisionId: revision.id },
+  });
+
+  return c.json({ document: { ...doc, currentRevisionId: revision.id }, created: true }, 201);
 });
 
 // Register a document in the master registry. Works even with no DMS and no

@@ -19,8 +19,41 @@ export default function DocumentDetailPage() {
   const [linkingDrive, setLinkingDrive] = useState(false);
   const [driveLinkError, setDriveLinkError] = useState('');
 
+  // Reclassification — this document was auto-created the moment a
+  // Requestor picked an unlinked Drive file (see /print-requests/new and
+  // POST /api/documents/from-drive-request): it has a tracking ID but a
+  // placeholder number/type. A Document Controller fills these in here
+  // before it can meaningfully go through approval.
+  const [classNumber, setClassNumber] = useState('');
+  const [classType, setClassType] = useState('SOP');
+  const [classifying, setClassifying] = useState(false);
+  const [classifyError, setClassifyError] = useState('');
+
   if (!data) return null;
   const { document: doc, revisions } = data;
+  const needsClassification = doc.documentType === 'PENDING_CLASSIFICATION';
+
+  async function classify(e: React.FormEvent) {
+    e.preventDefault();
+    if (!classNumber.trim()) {
+      setClassifyError('Give it a real document number before classifying.');
+      return;
+    }
+    setClassifying(true);
+    setClassifyError('');
+    const res = await fetch(`/api/documents/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ documentNumber: classNumber.trim(), documentType: classType }),
+    });
+    setClassifying(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setClassifyError(body.error || 'Could not save classification.');
+      return;
+    }
+    refetch();
+  }
 
   async function linkGoogleDrive(e: React.FormEvent) {
     e.preventDefault();
@@ -103,6 +136,32 @@ export default function DocumentDetailPage() {
         <Card><div className="text-nt-muted text-xs">Source</div><div className="text-nt-text text-sm mt-1">{doc.hasNoFileYet ? 'Paper master only' : 'Digital source on file'}</div></Card>
         <Card><div className="text-nt-muted text-xs">Confidentiality</div><div className="text-nt-text text-sm mt-1">{doc.confidentiality.replace(/_/g, ' ')}</div></Card>
       </div>
+
+      {needsClassification && can(PERMISSIONS.DOCUMENT_REGISTER) && (
+        <Card className="mb-6 max-w-xl border-nt-flagged/50">
+          <div className="text-nt-text text-sm font-medium mb-1">Needs classification</div>
+          <p className="text-nt-muted text-xs mb-3">
+            This document was auto-created when a requestor picked it up from Google Drive — it has a tracking ID
+            ({doc.documentNumber}) but no real document number or type yet, and its revision can't be approved until you set them.
+          </p>
+          <form onSubmit={classify} className="flex gap-2 items-start">
+            <input
+              className="nt-input text-sm flex-1"
+              value={classNumber}
+              onChange={(e) => setClassNumber(e.target.value)}
+              placeholder="SOP-PROD-012"
+              required
+            />
+            <select className="nt-input text-sm" value={classType} onChange={(e) => setClassType(e.target.value)}>
+              {['SOP', 'WI', 'BMR', 'BPR', 'STP', 'SPECIFICATION', 'FORMAT_CHECKLIST', 'EQUIPMENT_SOP', 'CLEANING_PROCEDURE', 'CALIBRATION_PROCEDURE', 'SAFETY_PROCEDURE', 'QUALITY_MANUAL'].map((t) => (
+                <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
+              ))}
+            </select>
+            <Button type="submit" disabled={classifying}>{classifying ? 'Saving...' : 'Classify'}</Button>
+          </form>
+          {classifyError && <div className="text-nt-blocked text-xs mt-2">{classifyError}</div>}
+        </Card>
+      )}
 
       <Card className="mb-6 max-w-xl">
         <div className="text-nt-text text-sm font-medium mb-1">Google Drive link</div>
