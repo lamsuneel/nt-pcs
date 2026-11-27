@@ -100,14 +100,26 @@ export async function getDriveAccessTokenForUser(subjectEmail: string): Promise<
 
   try {
     const assertion = await signJwtAssertion(key, subjectEmail, DRIVE_READONLY_SCOPE);
-    const res = await fetch(TOKEN_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-        assertion,
-      }),
-    });
+    // A hung token-endpoint connection must never stall the caller
+    // indefinitely — this is what was leaving the search UI stuck on
+    // "Searching Google Drive..." with no result and no error. 8s is well
+    // inside any reasonable serverless function budget.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    let res: Response;
+    try {
+      res = await fetch(TOKEN_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+          assertion,
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
     if (!res.ok) {
       const body = await res.text();
       console.error(`[google-service-account] token exchange failed for ${subjectEmail}: ${res.status} ${body}`);
@@ -117,7 +129,8 @@ export async function getDriveAccessTokenForUser(subjectEmail: string): Promise<
     tokenCache.set(cacheKey, { token: data.access_token, expiresAt: Date.now() + (data.expires_in - 300) * 1000 });
     return data.access_token;
   } catch (err) {
-    console.error(`[google-service-account] token exchange error for ${subjectEmail}:`, err);
+    const timedOut = err instanceof Error && err.name === 'AbortError';
+    console.error(`[google-service-account] token exchange ${timedOut ? 'timed out' : 'error'} for ${subjectEmail}:`, err);
     return null;
   }
 }

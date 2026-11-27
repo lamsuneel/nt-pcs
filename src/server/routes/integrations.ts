@@ -82,7 +82,17 @@ integrationRoutes.get('/google-drive/search', requireAuth, async (c) => {
       url.searchParams.set('q', `name contains '${q.replace(/'/g, "\\'")}' and trashed = false`);
       url.searchParams.set('fields', 'files(id,name,modifiedTime,webViewLink)');
       url.searchParams.set('pageSize', '15');
-      const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+      // Same reasoning as the token exchange: a hung Drive API call must
+      // never stall this route past a few seconds, or the search UI is
+      // left spinning with no result and no error to show.
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      let res: Response;
+      try {
+        res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${accessToken}` }, signal: controller.signal });
+      } finally {
+        clearTimeout(timeout);
+      }
       if (!res.ok) throw new Error(`Drive API returned ${res.status}`);
       const data = (await res.json()) as { files?: { id: string; name: string; modifiedTime: string; webViewLink: string }[] };
       const results = (data.files ?? []).map((f) => {

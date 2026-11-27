@@ -57,11 +57,28 @@ export default function NewDocumentPage() {
     }
     debounceRef.current = setTimeout(async () => {
       setDriveSearching(true);
-      const res = await fetch(`/api/integrations/google-drive/search?q=${encodeURIComponent(value)}`);
-      const body = await res.json().catch(() => ({ results: [] }));
-      setDriveSearching(false);
-      setDriveResults(body.results ?? []);
-      setDriveNote(body.note ?? '');
+      setDriveNote('');
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12000);
+        const res = await fetch(`/api/integrations/google-drive/search?q=${encodeURIComponent(value)}`, { signal: controller.signal });
+        clearTimeout(timeout);
+        const body = await res.json().catch(() => ({ results: [] }));
+        setDriveResults(body.results ?? []);
+        setDriveNote(body.note ?? '');
+      } catch (err) {
+        setDriveResults([]);
+        setDriveNote(
+          err instanceof Error && err.name === 'AbortError'
+            ? 'Google Drive search timed out — try again.'
+            : 'Could not reach Google Drive search right now — try again.'
+        );
+      } finally {
+        // Always clear the loading state, even on a network error or
+        // timeout — this is what was leaving the box stuck on "Searching..."
+        // forever with no result and no error shown.
+        setDriveSearching(false);
+      }
     }, 350);
   }
 
