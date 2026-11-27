@@ -81,7 +81,11 @@ async function main() {
   }[] = [
     { key: 'admin', fullName: 'Sanjay Rao', email: 'admin@demo-pharma.local', role: 'SYSTEM_ADMIN' },
     { key: 'qaHead', fullName: 'Dr. Lakshmi Narayan', email: 'qa.head@demo-pharma.local', role: 'QA_HEAD', deptCode: 'QA' },
-    { key: 'docController', fullName: 'Priya Menon', email: 'doc.controller@demo-pharma.local', role: 'DOCUMENT_CONTROLLER', deptCode: 'QA' },
+    // Real Workspace mailbox (granted Drive domain-wide delegation) — the
+    // Document Controller persona now also searches Drive directly (Issue
+    // Document's Drive picker), so it needs live delegation the same as the
+    // Requestor persona below.
+    { key: 'docController', fullName: 'Priya Menon', email: 'srividya.goruganthu@neuratrace.co', role: 'DOCUMENT_CONTROLLER', deptCode: 'QA' },
     { key: 'qaManager', fullName: 'Arjun Reddy', email: 'qa.manager@demo-pharma.local', role: 'QA_MANAGER', deptCode: 'QA' },
     { key: 'prodHead', fullName: 'Suresh Kumar', email: 'production.head@demo-pharma.local', role: 'DEPARTMENT_HEAD', deptCode: 'PROD' },
     // Real Workspace mailbox (granted Drive domain-wide delegation) so the
