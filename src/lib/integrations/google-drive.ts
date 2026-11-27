@@ -6,33 +6,38 @@
 // touches nothing else — not the webhook route, not the request/approval
 // pipeline.
 //
-// Two layers, so this is genuinely useful today and gets stronger once the
-// app has its own Google credentials:
+// Two layers, so this is genuinely useful today and gets stronger the
+// moment the customer's Workspace admin finishes the domain-wide-delegation
+// setup (see google-service-account.ts for exactly what that involves):
 //   1. Core match (always active): externalRef -> documents row where
 //      external_provider = 'GOOGLE_DRIVE' and external_ref = the Drive file
 //      ID, with its current revision APPROVED. This is the actual control —
 //      it's what stops an unapproved or stale document from being printed,
 //      and it needs nothing beyond our own database.
-//   2. Optional live verification: if GOOGLE_OAUTH_ACCESS_TOKEN (a short-
-//      lived bearer token for a Drive-scoped service account/OAuth client)
-//      is set in the environment, confirm the file still exists and hasn't
-//      been trashed in Drive before honoring the trigger — a plain REST
-//      call, no Google SDK dependency required. Skipped (not failed) when
-//      no token is configured — that's a deployment step for the
-//      customer's own Google Workspace, not something this adapter can do
-//      on anyone's behalf.
+//   2. Optional live verification: once GOOGLE_SERVICE_ACCOUNT_JSON (+
+//      domain-wide delegation) is configured, confirm the file still
+//      exists and hasn't been trashed in Drive before honoring the
+//      trigger. Skipped (not failed) when not configured — that's a
+//      deployment step for the customer's own Google Workspace, not
+//      something this adapter can do on anyone's behalf.
 
 import { eq, and } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { documents, documentRevisions } from '@/db/schema';
 import type { IntegrationAdapter, ResolvedExternalDocument } from './adapter';
+import { getDriveAccessTokenForSystem } from './google-service-account';
 
 async function verifyLiveInDrive(fileId: string): Promise<boolean> {
-  const accessToken = process.env.GOOGLE_OAUTH_ACCESS_TOKEN;
+  // The automated (webhook) path has no signed-in PrintAssure user to
+  // impersonate, so it uses the dedicated system subject
+  // (GOOGLE_WORKSPACE_DEFAULT_SUBJECT). The interactive search path
+  // (see server/routes/integrations.ts) impersonates the actual logged-in
+  // user instead, via getDriveAccessTokenForUser.
+  const accessToken = await getDriveAccessTokenForSystem();
   if (!accessToken) {
-    // No credentials configured — this is an expected, non-error state for
-    // most deployments today. The core DB-backed match above is still the
-    // real gate; this is a defense-in-depth extra, not the control itself.
+    // Not configured yet — this is an expected, non-error state. The core
+    // DB-backed match above is still the real gate; this is defense in
+    // depth, not the control itself.
     return true;
   }
   try {

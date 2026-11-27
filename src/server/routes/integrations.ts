@@ -22,6 +22,7 @@ import { getAdapter, type IntegrationProviderKey } from '@/lib/integrations/adap
 import { googleDriveAdapter } from '@/lib/integrations/google-drive';
 import { sharePointAdapter } from '@/lib/integrations/sharepoint';
 import { registerAdapter } from '@/lib/integrations/adapter';
+import { getDriveAccessTokenForUser, isServiceAccountConfigured } from '@/lib/integrations/google-service-account';
 import { requireAuth } from '../authz';
 
 registerAdapter(googleDriveAdapter);
@@ -47,7 +48,7 @@ export const integrationRoutes = new Hono();
 // + approved items can actually be selected to request a print; this is
 // what stops a print being requested against an unapproved/unregistered
 // file. Falls back to searching only already-linked documents by name when
-// no live Drive credentials are configured (GOOGLE_OAUTH_ACCESS_TOKEN unset)
+// no live Drive credentials are configured for this user yet
 // — still a real search, just scoped to what PrintAssure already knows
 // about, until live credentials are added.
 integrationRoutes.get('/google-drive/search', requireAuth, async (c) => {
@@ -72,7 +73,9 @@ integrationRoutes.get('/google-drive/search', requireAuth, async (c) => {
     );
   const linkedByRef = new Map(linked.filter((d) => d.externalRef).map((d) => [d.externalRef as string, d]));
 
-  const accessToken = process.env.GOOGLE_OAUTH_ACCESS_TOKEN;
+  // Domain-wide delegation: impersonate the signed-in user's own email, so
+  // the search runs over their own Drive with no separate Google login.
+  const accessToken = await getDriveAccessTokenForUser(session.email);
   if (accessToken) {
     try {
       const url = new URL('https://www.googleapis.com/drive/v3/files');
@@ -107,7 +110,9 @@ integrationRoutes.get('/google-drive/search', requireAuth, async (c) => {
     source: 'linked_documents_only',
     note: accessToken
       ? 'Live Google Drive search failed; showing already-linked documents that match instead.'
-      : 'Live Google Drive search isn’t configured yet (GOOGLE_OAUTH_ACCESS_TOKEN) — searching documents already linked to Drive instead.',
+      : isServiceAccountConfigured()
+        ? `Your Workspace admin hasn't granted Drive delegation for ${session.email} yet — showing already-linked documents instead.`
+        : "Live Google Drive search isn't configured yet (service account + domain-wide delegation) — showing already-linked documents instead.",
     results: fallbackMatches.map((d) => ({
       externalRef: d.externalRef,
       name: `${d.documentNumber} — ${d.title}`,
