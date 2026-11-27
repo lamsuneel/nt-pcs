@@ -461,18 +461,27 @@ async function main() {
     })
     .returning();
 
-  // Assign the default overlay profile to one document so Print Review is
-  // visible immediately on at least one real request (SOP-QA-001).
+  // Assign the default overlay profile to one document, and demo-link it to
+  // a (placeholder) Google Drive file, so Print Review and the Drive search
+  // on the "Request Controlled Print" screen are both visible immediately
+  // on at least one real document (SOP-QA-001) with no manual setup.
+  // Replace external_ref with a real Drive file ID once live search
+  // (GOOGLE_OAUTH_ACCESS_TOKEN) is configured.
   if (docRowsByNum['SOP-QA-001']) {
     await db
       .update(documents)
-      .set({ overlayProfileId: defaultOverlayProfile.id })
+      .set({
+        overlayProfileId: defaultOverlayProfile.id,
+        externalProvider: 'GOOGLE_DRIVE',
+        externalRef: 'demo-drive-file-sop-qa-001',
+      })
       .where(eq_(documents, docRowsByNum['SOP-QA-001'].id));
   }
 
   console.log('Seed complete.');
   console.log(`\nDefault printer: ${defaultPrinter.name} (simulated driver)`);
   console.log(`Default overlay profile: ${defaultOverlayProfile.name} (assigned to SOP-QA-001)`);
+  console.log('SOP-QA-001 is demo-linked to Google Drive (external_ref: demo-drive-file-sop-qa-001)');
   console.log('\nDemo logins (password: Password123!):');
   for (const def of userDefs) console.log(`  ${def.role.padEnd(20)} ${def.email}`);
 

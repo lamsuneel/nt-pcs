@@ -39,7 +39,7 @@ function buildTips(segment: string, kpis: Kpis | null): Tip[] {
       return tips;
     }
     case 'documents':
-      return [{ icon: '➕', text: 'Registering a document? The form pre-fills department and site options from your org.', actionLabel: 'Register a document', goto: '/documents/new' }];
+      return [{ icon: '➕', text: 'Issuing a document? The form pre-fills department and site options from your org.', actionLabel: 'Issue a document', goto: '/documents/new' }];
     case 'print-requests':
       return [{ icon: '✅', text: 'Approved requests move to Issue — issuing generates the copy IDs, QR codes and server-side PDFs in one step.' }];
     case 'copies':

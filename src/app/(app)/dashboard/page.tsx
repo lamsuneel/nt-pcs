@@ -24,7 +24,7 @@ export default function DashboardPage() {
         subtitle="Every printed GMP document, authorized, identifiable, traceable and accounted for."
         actions={
           <>
-            {can(PERMISSIONS.DOCUMENT_REGISTER) && <LinkButton href="/documents/new" variant="secondary">Register Document</LinkButton>}
+            {can(PERMISSIONS.DOCUMENT_REGISTER) && <LinkButton href="/documents/new" variant="secondary">Issue Document</LinkButton>}
             {can(PERMISSIONS.PRINT_REQUEST) && <LinkButton href="/print-requests/new">Request Controlled Print</LinkButton>}
           </>
         }
@@ -42,7 +42,7 @@ export default function DashboardPage() {
       <Card>
         <div className="font-display text-sm text-nt-text mb-3">Quick actions</div>
         <div className="flex flex-wrap gap-2">
-          {can(PERMISSIONS.DOCUMENT_REGISTER) && <LinkButton href="/documents/new" variant="secondary">Register Document</LinkButton>}
+          {can(PERMISSIONS.DOCUMENT_REGISTER) && <LinkButton href="/documents/new" variant="secondary">Issue Document</LinkButton>}
           {can(PERMISSIONS.PRINT_REQUEST) && <LinkButton href="/print-requests/new" variant="secondary">Request Controlled Print</LinkButton>}
           {can(PERMISSIONS.COPY_ISSUE) && <LinkButton href="/copies" variant="secondary">Issue Copy</LinkButton>}
           <LinkButton href="/verify" variant="secondary">Scan QR</LinkButton>

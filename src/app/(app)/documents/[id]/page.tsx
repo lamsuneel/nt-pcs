@@ -15,9 +15,45 @@ export default function DocumentDetailPage() {
 
   const [signingRevisionId, setSigningRevisionId] = useState<string | null>(null);
   const [signError, setSignError] = useState<string | null>(null);
+  const [driveRef, setDriveRef] = useState('');
+  const [linkingDrive, setLinkingDrive] = useState(false);
+  const [driveLinkError, setDriveLinkError] = useState('');
 
   if (!data) return null;
   const { document: doc, revisions } = data;
+
+  async function linkGoogleDrive(e: React.FormEvent) {
+    e.preventDefault();
+    setLinkingDrive(true);
+    setDriveLinkError('');
+    // Accept either a raw file ID or a full Drive URL
+    // (https://drive.google.com/file/d/<ID>/view or ?id=<ID>).
+    const raw = driveRef.trim();
+    const match = /\/d\/([a-zA-Z0-9_-]+)/.exec(raw) || /[?&]id=([a-zA-Z0-9_-]+)/.exec(raw);
+    const fileId = match ? match[1] : raw;
+    const res = await fetch(`/api/documents/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ externalProvider: 'GOOGLE_DRIVE', externalRef: fileId }),
+    });
+    setLinkingDrive(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setDriveLinkError(body.error || 'Failed to link this document to Google Drive');
+      return;
+    }
+    setDriveRef('');
+    refetch();
+  }
+
+  async function unlinkGoogleDrive() {
+    await fetch(`/api/documents/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ externalProvider: null, externalRef: null }),
+    });
+    refetch();
+  }
 
   async function confirmApprove(fullName: string) {
     if (!signingRevisionId) return;
@@ -43,7 +79,7 @@ export default function DocumentDetailPage() {
     await fetch(`/api/documents/${id}/revisions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ changeSummary: 'New revision registered from Document Register' }),
+      body: JSON.stringify({ changeSummary: 'New revision issued from Document Register' }),
     });
     setBusy(null);
     refetch();
@@ -57,7 +93,7 @@ export default function DocumentDetailPage() {
         actions={
           <>
             <LinkButton href={`/print-requests/new?documentId=${doc.id}`} variant="secondary">Request Controlled Print</LinkButton>
-            <Button onClick={newRevision} disabled={busy === 'new'}>{busy === 'new' ? 'Working...' : 'Register New Revision'}</Button>
+            <Button onClick={newRevision} disabled={busy === 'new'}>{busy === 'new' ? 'Working...' : 'Issue New Revision'}</Button>
           </>
         }
       />
@@ -67,6 +103,36 @@ export default function DocumentDetailPage() {
         <Card><div className="text-nt-muted text-xs">Source</div><div className="text-nt-text text-sm mt-1">{doc.hasNoFileYet ? 'Paper master only' : 'Digital source on file'}</div></Card>
         <Card><div className="text-nt-muted text-xs">Confidentiality</div><div className="text-nt-text text-sm mt-1">{doc.confidentiality.replace(/_/g, ' ')}</div></Card>
       </div>
+
+      <Card className="mb-6 max-w-xl">
+        <div className="text-nt-text text-sm font-medium mb-1">Google Drive link</div>
+        <p className="text-nt-muted text-xs mb-3">
+          Link this document to its Google Drive file so it can be found from the Drive search when requesting a print,
+          and so a Drive-triggered print request (Epic H) can resolve back to it.
+        </p>
+        {doc.externalProvider === 'GOOGLE_DRIVE' && doc.externalRef ? (
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-nt-text font-mono">{doc.externalRef}</div>
+            {can(PERMISSIONS.DOCUMENT_REGISTER) && (
+              <Button variant="ghost" onClick={unlinkGoogleDrive}>Unlink</Button>
+            )}
+          </div>
+        ) : can(PERMISSIONS.DOCUMENT_REGISTER) ? (
+          <form onSubmit={linkGoogleDrive} className="flex gap-2">
+            <input
+              className="nt-input flex-1 text-sm"
+              value={driveRef}
+              onChange={(e) => setDriveRef(e.target.value)}
+              placeholder="Google Drive file ID or link"
+              required
+            />
+            <Button type="submit" disabled={linkingDrive}>{linkingDrive ? 'Linking...' : 'Link'}</Button>
+          </form>
+        ) : (
+          <div className="text-nt-muted text-xs">Not linked.</div>
+        )}
+        {driveLinkError && <div className="text-nt-blocked text-xs mt-2">{driveLinkError}</div>}
+      </Card>
 
       <div className="font-display text-sm text-nt-text mb-3">Revision history</div>
       <Table>

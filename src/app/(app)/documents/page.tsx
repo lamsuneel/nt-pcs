@@ -25,7 +25,7 @@ export default function DocumentsPage() {
       <PageHeader
         title="Document Register"
         subtitle="The master register of controlled documents — works with or without a DMS."
-        actions={can(PERMISSIONS.DOCUMENT_REGISTER) ? <LinkButton href="/documents/new">Register Document</LinkButton> : undefined}
+        actions={can(PERMISSIONS.DOCUMENT_REGISTER) ? <LinkButton href="/documents/new">Issue Document</LinkButton> : undefined}
       />
 
       {!loading && docs.length === 0 && <EmptyState message="No documents registered yet." />}

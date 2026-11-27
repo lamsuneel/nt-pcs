@@ -22,6 +22,7 @@ import { getAdapter, type IntegrationProviderKey } from '@/lib/integrations/adap
 import { googleDriveAdapter } from '@/lib/integrations/google-drive';
 import { sharePointAdapter } from '@/lib/integrations/sharepoint';
 import { registerAdapter } from '@/lib/integrations/adapter';
+import { requireAuth } from '../authz';
 
 registerAdapter(googleDriveAdapter);
 registerAdapter(sharePointAdapter);
@@ -34,6 +35,122 @@ const PROVIDER_PATH_MAP: Record<string, IntegrationProviderKey> = {
 };
 
 export const integrationRoutes = new Hono();
+
+// Live Google Drive search for the "request print" screen — the document
+// picker searches Drive directly instead of only the local document list,
+// per the requirement to "pick up a copy" from Drive. Session-authed (this
+// is called from inside the app, not a webhook), scoped to the session's
+// organization for the linked-document cross-reference.
+//
+// Returns Drive search hits enriched with whether each one is already
+// linked to an approved, printable document in PrintAssure — only linked
+// + approved items can actually be selected to request a print; this is
+// what stops a print being requested against an unapproved/unregistered
+// file. Falls back to searching only already-linked documents by name when
+// no live Drive credentials are configured (GOOGLE_OAUTH_ACCESS_TOKEN unset)
+// — still a real search, just scoped to what PrintAssure already knows
+// about, until live credentials are added.
+integrationRoutes.get('/google-drive/search', requireAuth, async (c) => {
+  const session = c.get('session');
+  const q = (c.req.query('q') ?? '').trim();
+  if (!q) return c.json({ source: 'none', results: [] });
+
+  const linked = await db
+    .select({
+      externalRef: documents.externalRef,
+      documentId: documents.id,
+      documentNumber: documents.documentNumber,
+      title: documents.title,
+      currentRevisionId: documents.currentRevisionId,
+    })
+    .from(documents)
+    .where(
+      and(
+        eq(documents.organizationId, session.organizationId),
+        eq(documents.externalProvider, 'GOOGLE_DRIVE')
+      )
+    );
+  const linkedByRef = new Map(linked.filter((d) => d.externalRef).map((d) => [d.externalRef as string, d]));
+
+  const accessToken = process.env.GOOGLE_OAUTH_ACCESS_TOKEN;
+  if (accessToken) {
+    try {
+      const url = new URL('https://www.googleapis.com/drive/v3/files');
+      url.searchParams.set('q', `name contains '${q.replace(/'/g, "\\'")}' and trashed = false`);
+      url.searchParams.set('fields', 'files(id,name,modifiedTime,webViewLink)');
+      url.searchParams.set('pageSize', '15');
+      const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!res.ok) throw new Error(`Drive API returned ${res.status}`);
+      const data = (await res.json()) as { files?: { id: string; name: string; modifiedTime: string; webViewLink: string }[] };
+      const results = (data.files ?? []).map((f) => {
+        const match = linkedByRef.get(f.id);
+        return {
+          externalRef: f.id,
+          name: f.name,
+          modifiedTime: f.modifiedTime,
+          webViewLink: f.webViewLink,
+          linkedDocumentId: match?.documentId ?? null,
+          linkedDocumentNumber: match?.documentNumber ?? null,
+        };
+      });
+      return c.json({ source: 'live_drive', results });
+    } catch (err) {
+      console.error('[google-drive search] live search failed, falling back to linked documents:', err);
+      // fall through to the DB-backed fallback below
+    }
+  }
+
+  const fallbackMatches = linked.filter(
+    (d) => d.title.toLowerCase().includes(q.toLowerCase()) || d.documentNumber.toLowerCase().includes(q.toLowerCase())
+  );
+  return c.json({
+    source: 'linked_documents_only',
+    note: accessToken
+      ? 'Live Google Drive search failed; showing already-linked documents that match instead.'
+      : 'Live Google Drive search isn’t configured yet (GOOGLE_OAUTH_ACCESS_TOKEN) — searching documents already linked to Drive instead.',
+    results: fallbackMatches.map((d) => ({
+      externalRef: d.externalRef,
+      name: `${d.documentNumber} — ${d.title}`,
+      modifiedTime: null,
+      webViewLink: null,
+      linkedDocumentId: d.documentId,
+      linkedDocumentNumber: d.documentNumber,
+    })),
+  });
+});
+
+// Resolves a selected Drive file to the approved, printable document it's
+// linked to (same governance check the adapter applies to a webhook
+// trigger) — this is what the print-request form calls right before
+// letting the user submit, so a search hit can never be force-fit into a
+// print request it isn't actually approved for.
+integrationRoutes.get('/google-drive/resolve', requireAuth, async (c) => {
+  const session = c.get('session');
+  const fileId = c.req.query('fileId');
+  if (!fileId) return c.json({ error: 'fileId is required' }, 400);
+
+  let resolved;
+  try {
+    resolved = await googleDriveAdapter.resolveDocument(fileId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ error: `Google Drive adapter error: ${message}` }, 502);
+  }
+  if (!resolved) {
+    return c.json(
+      { error: 'This Drive file isn’t linked to an approved controlled document yet. Link it from the document’s page first.' },
+      404
+    );
+  }
+  const [doc] = await db
+    .select()
+    .from(documents)
+    .where(and(eq(documents.id, resolved.documentId), eq(documents.organizationId, session.organizationId)))
+    .limit(1);
+  if (!doc) return c.json({ error: 'Document not found in your organization' }, 404);
+
+  return c.json({ documentId: resolved.documentId, documentNumber: resolved.documentNumber, revisionLabel: resolved.revisionLabel });
+});
 
 integrationRoutes.post('/print-trigger/:provider/:orgSlug', async (c) => {
   const providerPath = c.req.param('provider');

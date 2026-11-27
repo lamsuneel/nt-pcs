@@ -1,10 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import useSWRLite from '@/lib/use-swr-lite';
 import { PageHeader, Card, Button, RequirePermission } from '@/components/ui';
 import { usePermissions } from '@/lib/use-permissions';
+
+interface DriveSearchResult {
+  externalRef: string;
+  name: string;
+  modifiedTime: string | null;
+  webViewLink: string | null;
+  linkedDocumentId: string | null;
+  linkedDocumentNumber: string | null;
+}
 
 export default function NewPrintRequestPage() {
   const router = useRouter();
@@ -25,6 +34,71 @@ export default function NewPrintRequestPage() {
   });
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // Google Drive document picker — replaces the old "select from our
+  // document list" dropdown. Typing searches Drive directly; only a result
+  // already linked to an approved controlled document can actually be
+  // selected (resolve confirms that server-side before it's accepted).
+  const [driveQuery, setDriveQuery] = useState('');
+  const [driveResults, setDriveResults] = useState<DriveSearchResult[]>([]);
+  const [driveNote, setDriveNote] = useState('');
+  const [driveSearching, setDriveSearching] = useState(false);
+  const [selectedLabel, setSelectedLabel] = useState('');
+  const [resolveError, setResolveError] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // If arriving with a documentId already set (e.g. from a document's own
+  // "Request Controlled Print" button), show its name instead of blanking
+  // the field until the person searches Drive again.
+  useEffect(() => {
+    if (form.documentId && !selectedLabel) {
+      const d = (docsData?.documents ?? []).find((x) => x.id === form.documentId);
+      if (d) setSelectedLabel(`${d.documentNumber} — ${d.title}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docsData, form.documentId]);
+
+  function onDriveQueryChange(value: string) {
+    setDriveQuery(value);
+    setResolveError('');
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!value.trim()) {
+      setDriveResults([]);
+      setDriveNote('');
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      setDriveSearching(true);
+      const res = await fetch(`/api/integrations/google-drive/search?q=${encodeURIComponent(value)}`);
+      const body = await res.json().catch(() => ({ results: [] }));
+      setDriveSearching(false);
+      setDriveResults(body.results ?? []);
+      setDriveNote(body.note ?? '');
+    }, 350);
+  }
+
+  async function pickDriveResult(result: DriveSearchResult) {
+    setResolveError('');
+    if (!result.linkedDocumentId) {
+      setResolveError(`"${result.name}" isn't linked to an approved controlled document yet. Open the document and link it to this Drive file first.`);
+      return;
+    }
+    const res = await fetch(`/api/integrations/google-drive/resolve?fileId=${encodeURIComponent(result.externalRef)}`);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setResolveError(body.error || 'This file could not be resolved to an approved document.');
+      return;
+    }
+    set('documentId', body.documentId);
+    setSelectedLabel(`${body.documentNumber} — rev ${body.revisionLabel} (from Google Drive: ${result.name})`);
+    setDriveQuery('');
+    setDriveResults([]);
+  }
+
+  function clearSelection() {
+    set('documentId', '');
+    setSelectedLabel('');
+  }
 
   function set<K extends keyof typeof form>(k: K, v: typeof form[K]) {
     setForm((f) => ({ ...f, [k]: v }));
@@ -48,20 +122,56 @@ export default function NewPrintRequestPage() {
     router.push('/print-requests');
   }
 
-  const docs = (docsData?.documents ?? []).filter((d) => d.currentRevisionId);
   const departments = org?.departments ?? [];
 
   return (
     <div className="max-w-2xl">
-      <PageHeader title="Request Controlled Print" subtitle="Only approved revisions can be requested for controlled printing." />
+      <PageHeader title="Request Controlled Print" subtitle="Search Google Drive to pick up the file to print — only approved, linked documents can be selected." />
       <RequirePermission allowed={can(PERMISSIONS.PRINT_REQUEST)} loading={permLoading}>
       <Card>
         <form onSubmit={submit} className="space-y-4">
-          <Field label="Document">
-            <select className="nt-input" value={form.documentId} onChange={(e) => set('documentId', e.target.value)} required>
-              <option value="">Select document</option>
-              {docs.map((d: any) => <option key={d.id} value={d.id}>{d.documentNumber} — {d.title}</option>)}
-            </select>
+          <Field label="Document (search Google Drive)">
+            {selectedLabel ? (
+              <div className="flex items-center justify-between nt-input">
+                <span className="text-sm text-nt-text truncate">{selectedLabel}</span>
+                <button type="button" onClick={clearSelection} className="text-xs text-nt-muted hover:text-nt-blocked ml-2 shrink-0">
+                  Change
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <input
+                  className="nt-input"
+                  value={driveQuery}
+                  onChange={(e) => onDriveQueryChange(e.target.value)}
+                  placeholder="Start typing a file name to search Google Drive..."
+                />
+                {driveSearching && <div className="text-xs text-nt-muted mt-1">Searching Google Drive...</div>}
+                {driveNote && !driveSearching && <div className="text-xs text-nt-muted mt-1">{driveNote}</div>}
+                {driveResults.length > 0 && (
+                  <div className="absolute z-10 mt-1 w-full nt-card max-h-64 overflow-y-auto">
+                    {driveResults.map((r) => (
+                      <button
+                        key={r.externalRef}
+                        type="button"
+                        onClick={() => pickDriveResult(r)}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-nt-panel2 border-b border-nt-border/60 last:border-0"
+                      >
+                        <div className="text-nt-text">{r.name}</div>
+                        <div className="text-xs mt-0.5">
+                          {r.linkedDocumentId ? (
+                            <span className="text-nt-compliant">✓ Linked — {r.linkedDocumentNumber}</span>
+                          ) : (
+                            <span className="text-nt-flagged">Not yet linked to a controlled document</span>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {resolveError && <div className="text-nt-blocked text-xs mt-1">{resolveError}</div>}
           </Field>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Number of copies">
@@ -93,7 +203,7 @@ export default function NewPrintRequestPage() {
           </Field>
 
           {error && <div className="text-nt-blocked text-sm">{error}</div>}
-          <Button type="submit" disabled={submitting}>{submitting ? 'Submitting...' : 'Submit Request'}</Button>
+          <Button type="submit" disabled={submitting || !form.documentId}>{submitting ? 'Submitting...' : 'Submit Request'}</Button>
         </form>
       </Card>
       </RequirePermission>

@@ -3,20 +3,21 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+// MVP scope = two personas only: Document Controller, and Requestor (which
+// can be any role holding PRINT_REQUEST). Kept here: Document Controller,
+// plus the roles that actually exercise the Requestor persona today
+// (DEPARTMENT_HEAD, EMPLOYEE). Every other demo role still exists and can
+// log in directly by email — this list is just the quick-select shortcut.
 const DEMO_USERS = [
-  ['QA Head', 'qa.head@demo-pharma.local'],
   ['Document Controller', 'doc.controller@demo-pharma.local'],
-  ['QA Manager', 'qa.manager@demo-pharma.local'],
   ['Production Dept Head', 'production.head@demo-pharma.local'],
   ['QA Executive (Employee)', 'qa.executive@demo-pharma.local'],
   ['Production Employee', 'production.employee@demo-pharma.local'],
-  ['Auditor', 'auditor@demo-pharma.local'],
-  ['System Admin', 'admin@demo-pharma.local'],
 ];
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('qa.head@demo-pharma.local');
+  const [email, setEmail] = useState('doc.controller@demo-pharma.local');
   const [password, setPassword] = useState('Password123!');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);

@@ -51,7 +51,7 @@ export default function NewDocumentPage() {
     setSubmitting(false);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      setError(body.error || 'Failed to register document');
+      setError(body.error || 'Failed to issue document');
       return;
     }
     const body = await res.json();
@@ -63,7 +63,7 @@ export default function NewDocumentPage() {
 
   return (
     <div className="max-w-2xl">
-      <PageHeader title="Register Document" subtitle="Works even with no DMS — this registers the document and a reference to its signed paper master." />
+      <PageHeader title="Issue Document" subtitle="Works even with no DMS — this issues the document into the controlled register, with a reference to its signed paper master." />
       <RequirePermission allowed={can(PERMISSIONS.DOCUMENT_REGISTER)} loading={permLoading}>
       <Card>
         <form onSubmit={submit} className="space-y-4">
@@ -122,7 +122,7 @@ export default function NewDocumentPage() {
           </div>
 
           {error && <div className="text-nt-blocked text-sm">{error}</div>}
-          <Button type="submit" disabled={submitting}>{submitting ? 'Registering...' : 'Register Document'}</Button>
+          <Button type="submit" disabled={submitting}>{submitting ? 'Issuing...' : 'Issue Document'}</Button>
         </form>
       </Card>
       </RequirePermission>
