@@ -9,7 +9,7 @@ import { useRouter } from 'next/navigation';
 // (DEPARTMENT_HEAD, EMPLOYEE). Every other demo role still exists and can
 // log in directly by email — this list is just the quick-select shortcut.
 const DEMO_USERS = [
-  ['Document Controller', 'doc.controller@demo-pharma.local'],
+  ['Document Controller', 'srinivas.mullapudi@neuratrace.co'],
   ['Production Dept Head', 'production.head@demo-pharma.local'],
   ['QA Executive (Employee)', 'qa.executive@demo-pharma.local'],
   ['Production Employee', 'production.employee@demo-pharma.local'],
@@ -17,7 +17,7 @@ const DEMO_USERS = [
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('doc.controller@demo-pharma.local');
+  const [email, setEmail] = useState('srinivas.mullapudi@neuratrace.co');
   const [password, setPassword] = useState('Password123!');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
