@@ -93,9 +93,19 @@ export default function PrintRequestsPage() {
                         </span>
                       )}
                       {can(PERMISSIONS.PRINT_ISSUE) && (
-                        <Button onClick={() => issue(r.id)} disabled={!!busy}>
-                          {busy === r.id + 'issue' ? 'Generating PDFs...' : 'Issue & Generate Copies'}
-                        </Button>
+                        <>
+                          <a
+                            href={`/api/print-requests/${r.id}/preview`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs text-nt-teal underline"
+                          >
+                            Preview
+                          </a>
+                          <Button onClick={() => issue(r.id)} disabled={!!busy}>
+                            {busy === r.id + 'issue' ? 'Generating PDFs...' : 'Issue & Generate Copies'}
+                          </Button>
+                        </>
                       )}
                     </div>
                   )}

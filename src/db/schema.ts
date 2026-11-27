@@ -274,6 +274,13 @@ export const documents = pgTable('documents', {
   // used when this document is printed. Assigned at registration time, not
   // resolved at print time — avoids the runtime profile-matching bottleneck.
   overlayProfileId: uuid('overlay_profile_id'),
+  // Epic H — inbound print-trigger mapping: which external system's item
+  // this document corresponds to, so a Google Drive / SharePoint / etc.
+  // webhook can resolve "print this" back to an internal document+revision
+  // without a runtime search. Set once at registration, same rationale as
+  // overlayProfileId above.
+  externalProvider: printJobSourceEnum('external_provider'),
+  externalRef: text('external_ref'),
   createdByUserId: uuid('created_by_user_id').notNull().references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -281,6 +288,7 @@ export const documents = pgTable('documents', {
   orgDocNumUnique: uniqueIndex('documents_org_docnum_unique').on(t.organizationId, t.documentNumber),
   siteIdx: index('documents_site_idx').on(t.siteId),
   deptIdx: index('documents_dept_idx').on(t.departmentId),
+  externalRefIdx: index('documents_external_ref_idx').on(t.externalProvider, t.externalRef),
 }));
 
 export const documentRevisions = pgTable('document_revisions', {

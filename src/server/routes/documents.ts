@@ -52,6 +52,29 @@ documentRoutes.get('/:id', async (c) => {
   return c.json({ document: doc, revisions: revisionsWithApproval });
 });
 
+// Print Review (Epic E) + inbound print-trigger mapping (Epic H): assign an
+// overlay profile and/or an external-system reference to a document.
+// Deliberately narrow — only these two concerns, not a general document
+// editor — so it can be gated on DOCUMENT_REGISTER the same as creating one.
+documentRoutes.patch('/:id', requirePermission(PERMISSIONS.DOCUMENT_REGISTER), async (c) => {
+  const session = c.get('session');
+  const id = c.req.param('id');
+  const body = await c.req.json();
+
+  const update: Record<string, unknown> = { updatedAt: new Date() };
+  if ('overlayProfileId' in body) update.overlayProfileId = body.overlayProfileId || null;
+  if ('externalProvider' in body) update.externalProvider = body.externalProvider || null;
+  if ('externalRef' in body) update.externalRef = body.externalRef || null;
+
+  const [updated] = await db
+    .update(documents)
+    .set(update)
+    .where(and(eq(documents.id, id), eq(documents.organizationId, session.organizationId)))
+    .returning();
+  if (!updated) return c.json({ error: 'Not found' }, 404);
+  return c.json({ document: updated });
+});
+
 // Register a document in the master registry. Works even with no DMS and no
 // uploaded file (hasNoFileYet) — per spec §1 "without forcing customers to
 // digitize their entire quality system."

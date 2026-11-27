@@ -20,6 +20,8 @@ import {
   recallItems,
   destructionConfirmations,
   auditEvents,
+  printers,
+  overlayProfiles,
 } from './schema';
 import { hashPassword } from '@/lib/auth';
 import { buildCopyIdentifier, generateQrToken } from '@/lib/copy-id';
@@ -425,7 +427,52 @@ async function main() {
     printedAt: new Date('2026-09-01'),
   });
 
+  // ---------------------------------------------------------------
+  // Epic F / Epic E — a default simulated printer and a default overlay
+  // profile, so the new print-queue + print-review pipeline is
+  // demonstrable end-to-end right after seeding, with no manual setup.
+  // ---------------------------------------------------------------
+  const [defaultPrinter] = await db
+    .insert(printers)
+    .values({
+      organizationId: org.id,
+      siteId: site.id,
+      name: 'QA-Printer-01',
+      connectionEndpoint: null, // simulated driver — no real hardware needed
+      supportedPaperSizes: ['A4'],
+    })
+    .returning();
+
+  const [defaultOverlayProfile] = await db
+    .insert(overlayProfiles)
+    .values({
+      organizationId: org.id,
+      name: 'Demo Pharma — Standard SOP Stamp',
+      paperSize: 'A4',
+      stampFields: [
+        { key: 'master_copy', label: '', value: 'MASTER COPY', page: 'first', x: 220, y: 780, fontSize: 14, bold: true },
+        { key: 'reviewed', label: '', value: 'REVIEWED — NO CHANGE', page: 'first', x: 180, y: 760, fontSize: 11, bold: true },
+        { key: 'next_review', label: 'Next Review Date', value: '01-Jun-2027', page: 'first', x: 50, y: 150, fontSize: 9, bold: false },
+        { key: 'reviewed_by', label: 'Reviewed By', value: 'Dr. Lakshmi Narayan', page: 'first', x: 50, y: 135, fontSize: 9, bold: false },
+        { key: 'review_date', label: 'Date', value: '01-Jun-2026', page: 'first', x: 50, y: 120, fontSize: 9, bold: false },
+      ],
+      isDefault: true,
+      createdByUserId: userRowsByKey.docController.id,
+    })
+    .returning();
+
+  // Assign the default overlay profile to one document so Print Review is
+  // visible immediately on at least one real request (SOP-QA-001).
+  if (docRowsByNum['SOP-QA-001']) {
+    await db
+      .update(documents)
+      .set({ overlayProfileId: defaultOverlayProfile.id })
+      .where(eq_(documents, docRowsByNum['SOP-QA-001'].id));
+  }
+
   console.log('Seed complete.');
+  console.log(`\nDefault printer: ${defaultPrinter.name} (simulated driver)`);
+  console.log(`Default overlay profile: ${defaultOverlayProfile.name} (assigned to SOP-QA-001)`);
   console.log('\nDemo logins (password: Password123!):');
   for (const def of userDefs) console.log(`  ${def.role.padEnd(20)} ${def.email}`);
 

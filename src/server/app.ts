@@ -8,6 +8,9 @@ import { recallRoutes } from './routes/recalls';
 import { reportRoutes } from './routes/reports';
 import { dashboardRoutes } from './routes/dashboard';
 import { metaRoutes } from './routes/meta';
+import { integrationRoutes } from './routes/integrations';
+import { printerRoutes } from './routes/printers';
+import { overlayProfileRoutes } from './routes/overlay-profiles';
 
 export const app = new Hono().basePath('/api');
 
@@ -20,6 +23,9 @@ app.route('/recalls', recallRoutes);
 app.route('/reports', reportRoutes);
 app.route('/dashboard', dashboardRoutes);
 app.route('/meta', metaRoutes);
+app.route('/integrations', integrationRoutes);
+app.route('/printers', printerRoutes);
+app.route('/overlay-profiles', overlayProfileRoutes);
 
 app.onError((err, c) => {
   console.error(err);
